@@ -31,3 +31,10 @@ lerna-debug.log*
 
 # misc
 .DS_Store
+
+# local secrets
+.dev.vars
+
+# pm2
+logs/
+*.log
