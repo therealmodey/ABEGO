@@ -7,7 +7,13 @@
   // ---------- Router with crossfade leave/enter transitions ----------
   const routes = {};
   let navToken = 0;
-  function go(r) { location.hash = '#' + r; }
+  function go(r) {
+    const target = '#' + r;
+    // Session/completion screens render without changing the hash — if the
+    // target hash is already current, no hashchange fires, so route manually.
+    if (location.hash === target) route();
+    else location.hash = target;
+  }
   function route() {
     const h = (location.hash || '#splash').slice(1).split('?')[0];
     const user = AuraState.user;
