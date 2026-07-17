@@ -104,8 +104,18 @@ pm2 start ecosystem.config.cjs                             # wrangler pages dev 
 - **Platform**: Cloudflare Pages (not yet deployed to production)
 - **Status**: ✅ Active in sandbox (PM2 + wrangler pages dev, local D1)
 - **Tech Stack**: Hono 4 + TypeScript + Cloudflare D1 + vanilla-JS SPA + hand-rolled design-token CSS
+
+## Premium Interaction Layer (2026-07-17)
+Apple-level interaction refinement — visual design system untouched, behavior only:
+- **Motion system**: screen crossfades (fade + 8–16px vertical, 350–500ms, `cubic-bezier(0.22,1,0.36,1)`), `navToken`-guarded router transitions, `prefers-reduced-motion` respected, GPU transforms only
+- **Modal manager** (`Aura.openModal`): body scroll lock while open, sheets capped at 90dvh with internal scroll + `overscroll-behavior: contain`, animated open (fade + scale 0.96→1.0) and reverse close
+- **Slider engine** (`Aura.attachSlider`): rAF-batched drag with zero re-renders, local state during drag, commit only on release, glow intensifies while dragging, haptic tick on release (`navigator.vibrate`)
+- **Customize / Quick Start sheets**: render-once with targeted span patches — no card re-render during interaction
+- **Viewport-perfect layout**: every core screen fits 100dvh with no scroll (flex column, bottom-anchored CTAs via `.cta-anchor`, height-based compression at ≤740px/≤640px); list-heavy routes opt out via `.screen--scroll`
+- **Session completion**: primary "Return Home" CTA anchored to bottom safe area, secondary "View Insights", session state fully reset — no dead-ends
+- **Loading states**: pulsing orb (`.orb-loading`) — never static spinners
 - **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY`, then `wrangler pages deploy dist`
-- **Last Updated**: 2026-07-13
+- **Last Updated**: 2026-07-17
 
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
