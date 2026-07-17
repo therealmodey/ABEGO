@@ -6,7 +6,7 @@
 
   async function load() {
     if (!AuraState.user) { location.href = '/#login'; return; }
-    root.innerHTML = `${bgHTML()}<div class="screen" style="align-items:center;justify-content:center">${orbHTML(140, 'idle')}</div>`;
+    root.innerHTML = `${bgHTML()}<div class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></div>`;
     let d;
     try { ({ data: d } = await api.get('/billing/me')); }
     catch (err) { handleApiError(err, 'Could not load billing.'); return; }
@@ -30,7 +30,7 @@
     const fmtDate = (s) => s ? new Date(s + (s.includes('Z') ? '' : 'Z')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
     root.innerHTML = `${bgHTML()}
-    <div class="screen" style="padding:24px 20px 60px;max-width:640px">
+    <div class="screen screen--scroll" style="padding:24px 20px 60px;max-width:640px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:28px">
         <a href="/#profile" class="btn-icon" aria-label="Back">${icon('back', 17)}</a>
         <span class="overline">Billing</span><span style="width:40px"></span>

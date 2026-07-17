@@ -1,19 +1,31 @@
 // AURA main app — hash-routed SPA replicating the design's 25-screen flow
 (function () {
   'use strict';
-  const { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError } = window.Aura;
+  const { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal } = window.Aura;
   const root = document.getElementById('app');
 
-  // ---------- Router ----------
+  // ---------- Router with crossfade leave/enter transitions ----------
   const routes = {};
+  let navToken = 0;
   function go(r) { location.hash = '#' + r; }
   function route() {
     const h = (location.hash || '#splash').slice(1).split('?')[0];
     const user = AuraState.user;
     const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'how', ''];
     if (!user && !publicRoutes.includes(h)) return go('welcome');
-    (routes[h] || routes.welcome)();
-    window.scrollTo(0, 0);
+    const token = ++navToken;
+    const leaving = root.querySelector('.screen');
+    const renderNext = () => {
+      if (token !== navToken) return; // superseded by a newer navigation
+      (routes[h] || routes.welcome)();
+      window.scrollTo(0, 0);
+    };
+    if (leaving && !leaving.classList.contains('screen--leaving')) {
+      leaving.classList.add('screen--leaving');
+      setTimeout(renderNext, 200); // overlap: new screen fades in as old finishes
+    } else {
+      renderNext();
+    }
   }
   window.addEventListener('hashchange', route);
 
@@ -60,7 +72,7 @@
   function authScreen(mode) {
     const isLogin = mode === 'login';
     root.innerHTML = `${bgHTML(isLogin ? 'blue' : '')}
-    <section class="screen" style="padding:24px;justify-content:center">
+    <section class="screen screen--scroll" style="padding:24px;justify-content:center">
       <div style="display:flex;justify-content:center;margin-bottom:28px">${orbHTML(120, 'idle', { intensity: 0.65 })}</div>
       <h1 style="font-size:26px;font-weight:600;text-align:center;margin-bottom:6px">${isLogin ? 'Welcome back.' : 'Create your space.'}</h1>
       <p style="font-size:14px;color:var(--text-tertiary);text-align:center;margin-bottom:30px">${isLogin ? 'Your practice is waiting.' : 'One minute to a calmer mind.'}</p>
@@ -108,7 +120,7 @@
       { phase: 'exhale', label: 'Exhale', desc: 'Release and soften', dur: '7s' },
     ];
     root.innerHTML = `${bgHTML('blue')}
-    <section class="screen" style="padding:24px">
+    <section class="screen screen--scroll" style="padding:24px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:36px">
         <span class="overline">Step 2 of 4</span>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
@@ -146,7 +158,7 @@
       { id: 'sleep', label: 'Sleep', ic: 'moon', color: '#A78BFA' },
     ];
     root.innerHTML = `${bgHTML()}
-    <section class="screen" style="padding:24px">
+    <section class="screen screen--scroll" style="padding:24px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:30px">
         <span class="overline">Step 3 of 4</span>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
@@ -156,7 +168,7 @@
       <div style="margin-bottom:30px">
         <div style="display:flex;justify-content:space-between;margin-bottom:14px">
           <span class="overline">Stress today</span>
-          <span id="stress-val" style="font-size:13px;color:#60A5FA">${stressLabel(ob.stress)} · ${ob.stress}</span>
+          <span id="stress-val" class="slider-val" style="font-size:13px;color:#60A5FA">${stressLabel(ob.stress)} · ${ob.stress}</span>
         </div>
         <input type="range" min="0" max="10" value="${ob.stress}" class="aura-slider" id="stress-slider" aria-label="Stress level">
       </div>
@@ -184,10 +196,10 @@
         <button class="btn-primary" id="next-btn">Continue</button>
       </div>
     </section>`;
-    document.getElementById('stress-slider').oninput = (e) => {
-      ob.stress = +e.target.value;
-      document.getElementById('stress-val').textContent = `${stressLabel(ob.stress)} · ${ob.stress}`;
-    };
+    attachSlider(document.getElementById('stress-slider'), {
+      onMove: (v) => setSliderVal(document.getElementById('stress-val'), `${stressLabel(v)} · ${v}`),
+      onCommit: (v) => { ob.stress = v; },
+    });
     document.querySelectorAll('.goal-card').forEach((b) => b.onclick = () => { ob.goal = b.dataset.goal; routes.personalize(); });
     document.querySelectorAll('[data-len]').forEach((b) => b.onclick = () => { ob.length = +b.dataset.len; routes.personalize(); });
     document.getElementById('next-btn').onclick = () => go('permissions');
@@ -202,7 +214,7 @@
       { key: 'reminders', label: 'Gentle Reminders', desc: 'A soft nudge, never a guilt trip', color: '#34D399' },
     ];
     root.innerHTML = `${bgHTML('green')}
-    <section class="screen" style="padding:24px">
+    <section class="screen screen--scroll" style="padding:24px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:16px">
         <span class="overline">Step 4 of 4</span><span></span>
       </header>
@@ -298,10 +310,7 @@
   // ================= 14 QUICK START (bottom sheet) =================
   function quickStartSheet() {
     let dur = 3, intent = 'relax';
-    const veil = document.createElement('div');
-    veil.className = 'modal-veil';
-    function render() {
-      veil.innerHTML = `
+    const m = openModal('modal-veil', `
       <div class="sheet">
         <div class="sheet-grabber"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px">
@@ -310,10 +319,10 @@
         </div>
         <div class="overline" style="margin-bottom:12px">Duration</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px">
-          ${[1, 3, 5].map((m) => `
-          <button class="chip ${dur === m ? 'selected' : ''}" data-dur="${m}" style="padding:14px;display:flex;flex-direction:column;gap:3px;border-radius:16px">
-            <span style="font-size:16px;font-weight:600">${m} min</span>
-            <span style="font-size:11px;opacity:0.6">${Math.round(m * 60 / 19)} breaths</span>
+          ${[1, 3, 5].map((mm) => `
+          <button class="chip ${dur === mm ? 'selected' : ''}" data-dur="${mm}" style="padding:14px;display:flex;flex-direction:column;gap:3px;border-radius:16px">
+            <span style="font-size:16px;font-weight:600">${mm} min</span>
+            <span style="font-size:11px;opacity:0.6">${Math.round(mm * 60 / 19)} breaths</span>
           </button>`).join('')}
         </div>
         <div class="overline" style="margin-bottom:12px">Intention</div>
@@ -321,21 +330,25 @@
           <button class="chip ${intent === 'relax' ? 'selected' : ''}" data-int="relax" style="padding:14px;border-radius:16px">Relax</button>
           <button class="chip ${intent === 'focus' ? 'selected' : ''}" data-int="focus" style="padding:14px;border-radius:16px">Focus</button>
         </div>
-        <button class="btn-primary" data-begin>Begin · ${dur} min</button>
-      </div>`;
-      veil.querySelector('[data-x]').onclick = () => veil.remove();
-      veil.querySelectorAll('[data-dur]').forEach((b) => b.onclick = () => { dur = +b.dataset.dur; render(); });
-      veil.querySelectorAll('[data-int]').forEach((b) => b.onclick = () => { intent = b.dataset.int; render(); });
-      veil.querySelector('[data-begin]').onclick = () => {
-        veil.remove();
-        const pat = intent === 'focus' ? { inhale: 4, hold: 4, exhale: 4 } : { inhale: 4, hold: 7, exhale: 8 };
-        const cycleSec = pat.inhale + pat.hold + pat.exhale;
-        startSession({ ...pat, cycles: Math.max(2, Math.round(dur * 60 / cycleSec)), name: intent === 'focus' ? 'Box' : '4-7-8' });
-      };
-    }
-    render();
-    veil.onclick = (e) => { if (e.target === veil) veil.remove(); };
-    document.body.appendChild(veil);
+        <button class="btn-primary" data-begin>Begin · <span class="slider-val" data-dur-label>${dur} min</span></button>
+      </div>`);
+    const veil = m.veil;
+    veil.querySelector('[data-x]').onclick = () => m.close();
+    veil.querySelectorAll('[data-dur]').forEach((b) => b.onclick = () => {
+      dur = +b.dataset.dur;
+      veil.querySelectorAll('[data-dur]').forEach((x) => x.classList.toggle('selected', +x.dataset.dur === dur));
+      setSliderVal(veil.querySelector('[data-dur-label]'), `${dur} min`);
+    });
+    veil.querySelectorAll('[data-int]').forEach((b) => b.onclick = () => {
+      intent = b.dataset.int;
+      veil.querySelectorAll('[data-int]').forEach((x) => x.classList.toggle('selected', x.dataset.int === intent));
+    });
+    veil.querySelector('[data-begin]').onclick = () => m.close(() => {
+      const pat = intent === 'focus' ? { inhale: 4, hold: 4, exhale: 4 } : { inhale: 4, hold: 7, exhale: 8 };
+      const cycleSec = pat.inhale + pat.hold + pat.exhale;
+      startSession({ ...pat, cycles: Math.max(2, Math.round(dur * 60 / cycleSec)), name: intent === 'focus' ? 'Box' : '4-7-8' });
+    });
+    veil.onclick = (e) => { if (e.target === veil) m.close(); };
   }
 
   // ================= 21 LOADING → 06 SESSION ACTIVE =================
@@ -466,12 +479,8 @@
   function pauseScreen() {
     const S = sessionCtl; if (!S) return;
     S.paused = true;
-    const veil = document.createElement('div');
-    veil.className = 'modal-veil modal-veil--center';
-    veil.style.background = 'rgba(6,8,15,0.55)';
-    veil.style.backdropFilter = 'blur(30px)';
-    veil.innerHTML = `
-      <div style="text-align:center;max-width:360px;width:100%;padding:0 24px">
+    const m = openModal('modal-veil modal-veil--center', `
+      <div class="sheet--center-plain" style="text-align:center;max-width:360px;width:100%;padding:0 24px;animation:auraCenterIn 300ms var(--ease-out) both">
         <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:24px">
           ${icon('pause', 12)} Paused
         </div>
@@ -484,35 +493,45 @@
         </div>
         <button class="btn-primary" data-resume style="margin-bottom:12px">${icon('play', 18)} Resume</button>
         <button class="btn-ghost" data-end>End session</button>
-      </div>`;
-    veil.querySelector('[data-resume]').onclick = () => { veil.remove(); S.paused = false; };
-    veil.querySelector('[data-end]').onclick = () => { veil.remove(); S.complete(false); };
-    document.body.appendChild(veil);
+      </div>`);
+    m.veil.style.background = 'rgba(6,8,15,0.55)';
+    m.veil.style.backdropFilter = 'blur(30px)';
+    m.veil.querySelector('[data-resume]').onclick = () => m.close(() => { S.paused = false; });
+    m.veil.querySelector('[data-end]').onclick = () => m.close(() => S.complete(false));
   }
 
   // ================= 07 COMPLETE =================
   function completeScreen(result, elapsed) {
+    sessionCtl = null; // fully reset session state — no dead-ends
     root.innerHTML = `${bgHTML('green')}
-    <section class="screen" style="padding:24px;align-items:center;justify-content:center;text-align:center">
-      <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#6EE7B7;margin-bottom:28px">
-        ${icon('check', 13)} Complete
+    <section class="screen" style="padding:24px;align-items:center;text-align:center">
+      <div style="padding-top:8px">
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#6EE7B7">
+          ${icon('check', 13)} Complete
+        </div>
       </div>
-      ${orbHTML(180, 'exhale', { intensity: 0.6 })}
-      <h1 style="font-size:30px;font-weight:600;letter-spacing:-0.5px;margin:32px 0 10px">You're calmer now.</h1>
-      <p style="font-size:14px;color:var(--text-tertiary);max-width:300px;line-height:1.55;margin-bottom:32px">
-        Heart rate down ${Math.abs(result.heartRateDelta)} bpm · Consistency ${result.consistency >= 80 ? 'improved from last session' : 'building with practice'}.
-      </p>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:380px;margin-bottom:36px">
+      <div class="orb-stage"><div class="orb-scale">${orbHTML(170, 'exhale', { intensity: 0.6 })}</div></div>
+      <div>
+        <h1 style="font-size:29px;font-weight:600;letter-spacing:-0.5px;margin-bottom:10px">You're calmer now.</h1>
+        <p class="compress-gap" style="font-size:14px;color:var(--text-tertiary);max-width:300px;line-height:1.55;margin:0 auto 24px">
+          Heart rate down ${Math.abs(result.heartRateDelta)} bpm · Consistency ${result.consistency >= 80 ? 'improved from last session' : 'building with practice'}.
+        </p>
+      </div>
+      <div class="stagger-in" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:380px;margin:22px 0">
         <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#60A5FA">${fmtTime(elapsed)}</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Duration</div></div>
         <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#34D399">${result.consistency}%</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Consistency</div></div>
         <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#A78BFA">${result.calmDelta}</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Calm score Δ</div></div>
       </div>
-      <div style="width:100%;max-width:380px">
-        <button class="btn-primary" id="finish-btn" style="margin-bottom:12px">Save & finish</button>
-        <button class="btn-ghost" id="again-btn">Start another cycle</button>
+      <div class="cta-anchor" style="width:100%;max-width:380px">
+        <button class="btn-primary" id="home-btn" style="margin-bottom:10px">${icon('home', 17)} Return Home</button>
+        <div style="display:flex;gap:10px">
+          <button class="btn-ghost" id="insights-btn" style="flex:1">${icon('stats', 15)} View Insights</button>
+          <button class="btn-ghost" id="again-btn" style="flex:1">Go again</button>
+        </div>
       </div>
     </section>`;
-    document.getElementById('finish-btn').onclick = () => go('home');
+    document.getElementById('home-btn').onclick = () => go('home');
+    document.getElementById('insights-btn').onclick = () => go('stats');
     document.getElementById('again-btn').onclick = () => startSession({ inhale: 4, hold: 7, exhale: 8, cycles: 6, name: '4-7-8' });
   }
 
@@ -530,7 +549,7 @@
       const dayStr = now.toLocaleDateString('en-US', { weekday: 'long' });
       const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
       root.innerHTML = `${bgHTML()}
-      <section class="screen" style="padding:24px">
+      <section class="screen screen--scroll" style="padding:24px">
         <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:26px">
           <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
           <span class="overline">Check-in</span><span style="width:40px"></span>
@@ -576,7 +595,7 @@
 
   // ================= 09 STATS / INSIGHTS =================
   routes.stats = async function () {
-    root.innerHTML = `${bgHTML('deep')}<section class="screen" style="align-items:center;justify-content:center">${orbHTML(140, 'idle')}</section>`;
+    root.innerHTML = `${bgHTML('deep')}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
     let d;
     try { ({ data: d } = await api.get('/app/stats')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -609,7 +628,7 @@
     const maxScore = Math.max(...week.map((w) => w.score), 60);
 
     root.innerHTML = `${bgHTML('deep')}
-    <section class="screen" style="padding:24px 20px 40px">
+    <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:24px">
         <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Insights</span>
@@ -683,7 +702,7 @@
 
   // ================= 13 PROGRAMS =================
   routes.programs = async function () {
-    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center">${orbHTML(140, 'idle')}</section>`;
+    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
     let d;
     try { ({ data: d } = await api.get('/app/programs')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -694,7 +713,7 @@
     function render() {
       const list = d.programs.filter((p) => filter === 'All' || p.tag === filter);
       root.innerHTML = `${bgHTML()}
-      <section class="screen" style="padding:24px 20px 40px">
+      <section class="screen screen--scroll" style="padding:24px 20px 40px">
         <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
           <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
           <span class="overline">Library</span><span style="width:40px"></span>
@@ -734,16 +753,16 @@
 
   // ================= 12 SESSION SETUP =================
   function sessionSetup(program) {
-    let inhale = program.inhale, hold = program.hold, exhale = program.exhale, cycles = program.cycles;
-    const veil = document.createElement('div');
-    veil.className = 'modal-veil';
+    // State isolated in a local object; the card renders ONCE.
+    // Slider drags patch only the value nodes — the layout never re-renders.
+    const st = { inhale: program.inhale, hold: program.hold, exhale: program.exhale, cycles: program.cycles };
+    const COLORS = { inhale: '#60A5FA', hold: '#A78BFA', exhale: '#34D399' };
     function totalStr() {
-      const s = (inhale + hold + exhale) * cycles;
+      const s = (st.inhale + st.hold + st.exhale) * st.cycles;
       return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     }
-    function render() {
-      veil.innerHTML = `
-      <div class="sheet" style="max-height:88vh;overflow-y:auto">
+    const m = openModal('modal-veil', `
+      <div class="sheet">
         <div class="sheet-grabber"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
           <button class="btn-icon" data-x style="width:34px;height:34px">${icon('close', 15)}</button>
@@ -751,46 +770,52 @@
         </div>
         <div style="display:flex;justify-content:center;margin-bottom:14px">${orbHTML(110, program.phase || 'idle', { intensity: 0.7 })}</div>
         <div class="tabular" style="text-align:center;font-size:26px;font-weight:300;margin-bottom:22px">
-          <span style="color:#60A5FA">${inhale}</span> <span style="color:var(--text-disabled)">·</span>
-          <span style="color:#A78BFA">${hold}</span> <span style="color:var(--text-disabled)">·</span>
-          <span style="color:#34D399">${exhale}</span>
+          <span class="slider-val" data-big="inhale" style="color:#60A5FA">${st.inhale}</span> <span style="color:var(--text-disabled)">·</span>
+          <span class="slider-val" data-big="hold" style="color:#A78BFA">${st.hold}</span> <span style="color:var(--text-disabled)">·</span>
+          <span class="slider-val" data-big="exhale" style="color:#34D399">${st.exhale}</span>
         </div>
         <div class="glass" style="padding:20px;margin-bottom:20px">
-          ${[['Inhale', 'inhale', inhale, '#60A5FA', 2, 10], ['Hold', 'hold', hold, '#A78BFA', 0, 10], ['Exhale', 'exhale', exhale, '#34D399', 2, 12]].map(([label, key, val, color, min, max]) => `
+          ${[['Inhale', 'inhale', st.inhale, 2, 10], ['Hold', 'hold', st.hold, 0, 10], ['Exhale', 'exhale', st.exhale, 2, 12]].map(([label, key, val, min, max]) => `
           <div style="margin-bottom:18px">
             <div style="display:flex;justify-content:space-between;margin-bottom:10px">
               <span style="font-size:13px;color:var(--text-secondary)">${label}</span>
-              <span class="tabular" style="font-size:15px;font-weight:500;color:${color};text-shadow:0 0 12px ${color}">${val}s</span>
+              <span class="tabular slider-val" data-val="${key}" style="font-size:15px;font-weight:500;color:${COLORS[key]};text-shadow:0 0 12px ${COLORS[key]}">${val}s</span>
             </div>
             <input type="range" min="${min}" max="${max}" value="${val}" class="aura-slider" data-k="${key}" aria-label="${label} seconds">
           </div>`).join('')}
         </div>
         <div class="overline" style="margin-bottom:12px">Cycles</div>
-        <div style="display:flex;gap:8px;margin-bottom:24px">
-          ${[4, 6, 8, 10, 12].map((n) => `<button class="chip ${cycles === n ? 'selected' : ''}" data-c="${n}" style="flex:1;text-align:center">${n}</button>`).join('')}
+        <div style="display:flex;gap:8px;margin-bottom:24px" data-cycles>
+          ${[4, 6, 8, 10, 12].map((n) => `<button class="chip ${st.cycles === n ? 'selected' : ''}" data-c="${n}" style="flex:1;text-align:center">${n}</button>`).join('')}
         </div>
-        <button class="btn-primary" data-begin>Begin session · ${totalStr()}</button>
-      </div>`;
-      veil.querySelector('[data-x]').onclick = () => veil.remove();
-      veil.querySelectorAll('.aura-slider').forEach((s) => s.oninput = (e) => {
-        const v = +e.target.value;
-        if (s.dataset.k === 'inhale') inhale = v; else if (s.dataset.k === 'hold') hold = v; else exhale = v;
-        render();
-      });
-      veil.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => { cycles = +b.dataset.c; render(); });
-      veil.querySelector('[data-begin]').onclick = () => {
-        veil.remove();
-        startSession({ inhale, hold, exhale, cycles, name: program.title, programId: program.id });
-      };
-    }
-    render();
-    veil.onclick = (e) => { if (e.target === veil) veil.remove(); };
-    document.body.appendChild(veil);
+        <button class="btn-primary" data-begin>Begin session · <span class="slider-val" data-total>${totalStr()}</span></button>
+      </div>`);
+    const veil = m.veil;
+    const q = (sel) => veil.querySelector(sel);
+    function syncTotal() { setSliderVal(q('[data-total]'), totalStr()); }
+
+    veil.querySelectorAll('.aura-slider').forEach((s) => attachSlider(s, {
+      onMove: (v) => {
+        const k = s.dataset.k;
+        setSliderVal(q(`[data-val="${k}"]`), v + 's');
+        setSliderVal(q(`[data-big="${k}"]`), String(v));
+      },
+      onCommit: (v) => { st[s.dataset.k] = v; syncTotal(); },
+    }));
+    veil.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => {
+      st.cycles = +b.dataset.c;
+      veil.querySelectorAll('[data-c]').forEach((x) => x.classList.toggle('selected', +x.dataset.c === st.cycles));
+      syncTotal();
+    });
+    q('[data-x]').onclick = () => m.close();
+    q('[data-begin]').onclick = () => m.close(() =>
+      startSession({ inhale: st.inhale, hold: st.hold, exhale: st.exhale, cycles: st.cycles, name: program.title, programId: program.id }));
+    veil.onclick = (e) => { if (e.target === veil) m.close(); };
   }
 
   // ================= 16 HISTORY =================
   routes.history = async function () {
-    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center">${orbHTML(140, 'idle')}</section>`;
+    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
     let d;
     try { ({ data: d } = await api.get('/app/history')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -810,7 +835,7 @@
     const streakBars = Array.from({ length: 17 }, (_, i) => i < Math.min(d.summary.streak, 17));
 
     root.innerHTML = `${bgHTML()}
-    <section class="screen" style="padding:24px 20px 40px">
+    <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
         <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">History</span><span style="width:40px"></span>
@@ -837,7 +862,7 @@
 
   // ================= 15 PROFILE =================
   routes.profile = async function () {
-    root.innerHTML = `${bgHTML('violet')}<section class="screen" style="align-items:center;justify-content:center">${orbHTML(140, 'idle')}</section>`;
+    root.innerHTML = `${bgHTML('violet')}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
     let d, me;
     try {
       [{ data: d }, { data: me }] = await Promise.all([api.get('/app/stats'), api.get('/auth/me')]);
@@ -852,7 +877,7 @@
       { label: 'Calm 90+', unlocked: d.calmScore >= 90 },
     ];
     root.innerHTML = `${bgHTML()}
-    <section class="screen" style="padding:24px 20px 40px">
+    <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:26px">
         <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Profile</span>
@@ -913,7 +938,7 @@
     function save() { api.put('/app/profile', { prefs }).catch((err) => handleApiError(err)); }
 
     root.innerHTML = `${bgHTML()}
-    <section class="screen" style="padding:24px 20px 40px">
+    <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:24px">
         <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Settings</span><span style="width:40px"></span>
@@ -962,7 +987,7 @@
       <div class="glass" style="padding:18px;margin-bottom:24px">
         <div style="display:flex;justify-content:space-between;margin-bottom:12px">
           <span style="font-size:14px">Theme intensity</span>
-          <span class="tabular" id="theme-val" style="font-size:13px;color:#A5F3FC">${prefs.theme}%</span>
+          <span class="tabular slider-val" id="theme-val" style="font-size:13px;color:#A5F3FC">${prefs.theme}%</span>
         </div>
         <input type="range" min="0" max="100" value="${prefs.theme}" class="aura-slider" id="theme-slider" aria-label="Theme intensity">
       </div>
@@ -976,11 +1001,10 @@
       prefs[k] = !prefs[k]; t.classList.toggle('on'); save();
     });
     document.querySelectorAll('[data-glow]').forEach((b) => b.onclick = () => { prefs.glow = b.dataset.glow; save(); routes.settings(); });
-    document.getElementById('theme-slider').oninput = (e) => {
-      prefs.theme = +e.target.value;
-      document.getElementById('theme-val').textContent = prefs.theme + '%';
-    };
-    document.getElementById('theme-slider').onchange = save;
+    attachSlider(document.getElementById('theme-slider'), {
+      onMove: (v) => setSliderVal(document.getElementById('theme-val'), v + '%'),
+      onCommit: (v) => { prefs.theme = v; save(); },
+    });
   };
 
   route(); // boot

@@ -113,6 +113,74 @@
     return `<svg width="${size || 20}" height="${size || 20}" viewBox="0 0 24 24" fill="none" stroke="${color || 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
   }
 
+  // ---------- Modal manager: scroll lock + animated open/close ----------
+  let openModals = 0;
+  function lockScroll() { if (++openModals === 1) document.body.classList.add('modal-open'); }
+  function unlockScroll() { if (--openModals <= 0) { openModals = 0; document.body.classList.remove('modal-open'); } }
+
+  // openModal(className, html) -> { veil, close(cb) }
+  // close() plays the reverse animation, unlocks scroll, then removes.
+  function openModal(className, html) {
+    const veil = document.createElement('div');
+    veil.className = className;
+    veil.innerHTML = html;
+    lockScroll();
+    let closed = false;
+    function close(after) {
+      if (closed) return; closed = true;
+      veil.classList.add('modal-veil--closing');
+      unlockScroll();
+      setTimeout(() => { veil.remove(); if (after) after(); }, 260);
+    }
+    document.body.appendChild(veil);
+    return { veil, close };
+  }
+
+  // ---------- Slider engine ----------
+  // Continuous drag: visual value tracks pointer via rAF (no re-render),
+  // onMove fires per frame for readouts, onCommit fires once on release.
+  function attachSlider(input, { onMove, onCommit } = {}) {
+    let raf = 0, pending = null, dragging = false;
+    function flush() {
+      raf = 0;
+      if (pending === null) return;
+      const v = pending; pending = null;
+      if (onMove) onMove(v, input);
+    }
+    input.addEventListener('input', () => {
+      pending = +input.value;
+      if (!raf) raf = requestAnimationFrame(flush);
+    }, { passive: true });
+    function start() {
+      if (dragging) return; dragging = true;
+      input.classList.add('dragging');
+    }
+    function end() {
+      if (!dragging) { return; }
+      dragging = false;
+      input.classList.remove('dragging');
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (pending !== null) { const v = pending; pending = null; if (onMove) onMove(v, input); }
+      if (onCommit) onCommit(+input.value, input);
+      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+    }
+    input.addEventListener('pointerdown', start, { passive: true });
+    input.addEventListener('pointerup', end, { passive: true });
+    input.addEventListener('pointercancel', end, { passive: true });
+    // keyboard support: commit per change
+    input.addEventListener('change', () => { if (!dragging && onCommit) onCommit(+input.value, input); }, { passive: true });
+    return input;
+  }
+
+  // Crossfade-free value readout update (bump animation, no flicker)
+  function setSliderVal(el, text) {
+    if (!el || el.textContent === text) return;
+    el.textContent = text;
+    el.classList.remove('bump');
+    void el.offsetWidth; // restart animation
+    el.classList.add('bump');
+  }
+
   // ---------- UI helpers ----------
   let toastTimer;
   function toast(msg, ms) {
@@ -127,9 +195,7 @@
 
   function confirmModal(title, body, confirmLabel, danger) {
     return new Promise((resolve) => {
-      const veil = document.createElement('div');
-      veil.className = 'modal-veil modal-veil--center';
-      veil.innerHTML = `
+      const m = openModal('modal-veil modal-veil--center', `
         <div class="sheet sheet--center" style="max-width:380px">
           <h3 style="font-size:19px;font-weight:600;margin-bottom:10px">${title}</h3>
           <p style="font-size:14px;color:var(--text-tertiary);line-height:1.55;margin-bottom:24px">${body}</p>
@@ -137,19 +203,16 @@
             <button class="btn-ghost" data-x style="flex:1">Cancel</button>
             <button class="btn-primary" data-ok style="flex:1;${danger ? 'background:linear-gradient(135deg,#F59E0B,#EF7B0B);box-shadow:0 10px 40px rgba(245,158,11,0.35)' : ''}">${confirmLabel || 'Confirm'}</button>
           </div>
-        </div>`;
-      veil.querySelector('[data-x]').onclick = () => { veil.remove(); resolve(false); };
-      veil.querySelector('[data-ok]').onclick = () => { veil.remove(); resolve(true); };
-      veil.onclick = (e) => { if (e.target === veil) { veil.remove(); resolve(false); } };
-      document.body.appendChild(veil);
+        </div>`);
+      m.veil.querySelector('[data-x]').onclick = () => m.close(() => resolve(false));
+      m.veil.querySelector('[data-ok]').onclick = () => m.close(() => resolve(true));
+      m.veil.onclick = (e) => { if (e.target === m.veil) m.close(() => resolve(false)); };
     });
   }
 
   // Upgrade prompt shown when API returns 402
   function upgradeModal(message) {
-    const veil = document.createElement('div');
-    veil.className = 'modal-veil modal-veil--center';
-    veil.innerHTML = `
+    const m = openModal('modal-veil modal-veil--center', `
       <div class="sheet sheet--center" style="max-width:400px;text-align:center">
         <div style="display:flex;justify-content:center;margin-bottom:16px">${orbHTML(90, 'hold', { intensity: 0.9 })}</div>
         <div style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:9999px;background:linear-gradient(135deg,rgba(124,58,237,0.35),rgba(34,211,238,0.25));border:1px solid rgba(167,139,250,0.4);font-size:12px;font-weight:600;letter-spacing:1px;margin-bottom:14px">${icon('spark', 13)} AURA PLUS</div>
@@ -157,10 +220,9 @@
         <p style="font-size:14px;color:var(--text-tertiary);line-height:1.55;margin-bottom:24px">${message || 'Unlock unlimited sessions, every program, and deep analytics.'}</p>
         <a href="/pricing" class="btn-primary" style="margin-bottom:10px">See plans</a>
         <button class="btn-ghost" data-x>Not now</button>
-      </div>`;
-    veil.querySelector('[data-x]').onclick = () => veil.remove();
-    veil.onclick = (e) => { if (e.target === veil) veil.remove(); };
-    document.body.appendChild(veil);
+      </div>`);
+    m.veil.querySelector('[data-x]').onclick = () => m.close();
+    m.veil.onclick = (e) => { if (e.target === m.veil) m.close(); };
   }
 
   function bgHTML(hue) {
@@ -182,5 +244,5 @@
     toast((data && data.error) || fallback || 'Something went wrong.');
   }
 
-  window.Aura = { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError };
+  window.Aura = { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal };
 })();

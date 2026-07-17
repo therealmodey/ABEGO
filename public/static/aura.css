@@ -540,3 +540,163 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
   0%, 100% { box-shadow: 0 0 18px rgba(124,58,237,0.45); transform: scale(1); }
   50% { box-shadow: 0 0 32px rgba(124,58,237,0.75); transform: scale(1.06); }
 }
+
+/* ================================================================
+   PREMIUM INTERACTION LAYER — motion, viewport-fit, slider, modal
+   (behavior refinements only; visual design tokens unchanged)
+   ================================================================ */
+
+/* ---------- Global motion primitives ---------- */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+html { scroll-behavior: smooth; }
+body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+body.modal-open { overflow: hidden; touch-action: none; }
+
+/* Screen enter/leave crossfade: fade + 12px vertical rise */
+@keyframes auraScreenIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes auraScreenOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-8px) scale(0.995); }
+}
+.screen {
+  animation: auraScreenIn 420ms var(--ease-out) both;
+  will-change: opacity, transform;
+  padding-top: var(--safe-top);
+}
+.screen--leaving { animation: auraScreenOut 240ms var(--ease) both; pointer-events: none; }
+
+/* ---------- Viewport-perfect layout ---------- */
+.screen {
+  height: 100vh; height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+/* screens that legitimately need scroll (lists, admin, pricing) opt out */
+.screen--scroll {
+  height: auto; min-height: 100vh; min-height: 100dvh;
+  overflow: visible;
+}
+.screen--wide { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+
+/* CTA anchored to bottom safe area */
+.cta-anchor { padding-bottom: calc(24px + var(--safe-bottom)); margin-top: auto; }
+
+/* Adaptive density: compress spacing/typography instead of scrolling */
+@media (max-height: 740px) {
+  .screen h1 { font-size: 90%; }
+  .compress-gap { margin-bottom: 18px !important; }
+}
+@media (max-height: 640px) {
+  /* iPhone SE class devices */
+  .screen h1 { font-size: 82%; }
+  .compress-gap { margin-bottom: 12px !important; }
+  .orb-scale { transform: scale(0.82); }
+}
+/* Orb scales with viewport height, never clipped */
+.orb-stage {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  contain: layout;
+}
+.orb-stage > * { max-height: 100%; }
+
+/* ---------- Micro-interactions (GPU transforms only) ---------- */
+.btn-primary, .btn-ghost, .btn-icon, .chip, .fab, .goal-card, .mood-card, .a-act {
+  will-change: transform;
+  transition-property: transform, box-shadow, background, color, border-color, opacity;
+  transition-duration: var(--dur-med);
+  transition-timing-function: var(--ease-out);
+}
+.btn-primary:active { transform: scale(0.98); box-shadow: 0 8px 32px rgba(124,58,237,0.65), 0 0 70px rgba(34,211,238,0.3); transition-duration: 120ms; }
+.btn-ghost:active, .btn-icon:active, .chip:active { transform: scale(0.98); transition-duration: 120ms; }
+.glass { transition: box-shadow var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out); }
+button.glass:active, a.glass:active { transform: scale(0.985); box-shadow: 0 6px 28px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.08); transition-duration: 120ms; }
+
+/* Toggle: springier knob travel */
+.toggle::after { transition: left 320ms var(--ease-out), transform 160ms var(--ease-out); }
+.toggle { transition: background 320ms var(--ease-out), box-shadow 320ms var(--ease-out), border-color 320ms var(--ease-out); }
+
+/* ---------- Slider engine (custom, GPU-driven) ---------- */
+input[type="range"].aura-slider {
+  touch-action: none;             /* we own the gesture */
+  cursor: grab;
+  transition: filter 240ms var(--ease-out);
+}
+input[type="range"].aura-slider.dragging { cursor: grabbing; filter: drop-shadow(0 0 10px rgba(96,165,250,0.55)) brightness(1.08); }
+input[type="range"].aura-slider::-webkit-slider-thumb { transition: transform 180ms var(--ease-out), box-shadow 240ms var(--ease-out); will-change: transform; }
+input[type="range"].aura-slider.dragging::-webkit-slider-thumb { transform: scale(1.25); box-shadow: 0 0 26px rgba(96,165,250,1), 0 2px 8px rgba(0,0,0,0.45); }
+input[type="range"].aura-slider::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%; border: none;
+  background: #fff; box-shadow: 0 0 16px rgba(96,165,250,0.8), 0 2px 6px rgba(0,0,0,0.4);
+  transition: transform 180ms var(--ease-out);
+}
+input[type="range"].aura-slider.dragging::-moz-range-thumb { transform: scale(1.25); }
+/* value readouts crossfade instead of flicker */
+.slider-val { display: inline-block; transition: opacity 140ms var(--ease), transform 140ms var(--ease); will-change: opacity; }
+.slider-val.bump { animation: auraValBump 220ms var(--ease-out); }
+@keyframes auraValBump { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+/* ---------- Modal / sheet system ---------- */
+.modal-veil {
+  animation: auraVeilIn 300ms var(--ease-out) both;
+  overscroll-behavior: contain;
+}
+@keyframes auraVeilIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-veil--closing { animation: auraVeilOut 260ms var(--ease) both; pointer-events: none; }
+@keyframes auraVeilOut { from { opacity: 1; } to { opacity: 0; } }
+
+.sheet {
+  max-height: 90vh; max-height: 90dvh;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(40px + var(--safe-bottom));
+  animation: auraSheetIn 340ms var(--ease-out) both;
+  will-change: transform, opacity;
+}
+@keyframes auraSheetIn {
+  from { opacity: 0; transform: translateY(28px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-veil--closing .sheet { animation: auraSheetOut 260ms var(--ease) both; }
+@keyframes auraSheetOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(22px) scale(0.98); }
+}
+.sheet--center { animation: auraCenterIn 300ms var(--ease-out) both; }
+@keyframes auraCenterIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.modal-veil--closing .sheet--center { animation: auraCenterOut 240ms var(--ease) both; }
+@keyframes auraCenterOut {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.96); }
+}
+/* hide scrollbars inside sheets but keep scrollability */
+.sheet::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ---------- Orb-as-loader (never a static spinner) ---------- */
+.orb-loading { animation: auraOrbLoading 2.4s var(--ease) infinite; will-change: transform, opacity; }
+@keyframes auraOrbLoading {
+  0%, 100% { transform: scale(0.94); opacity: 0.75; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+/* stat cards on completion stagger in */
+.stagger-in > * { animation: auraScreenIn 480ms var(--ease-out) both; }
+.stagger-in > *:nth-child(1) { animation-delay: 60ms; }
+.stagger-in > *:nth-child(2) { animation-delay: 140ms; }
+.stagger-in > *:nth-child(3) { animation-delay: 220ms; }
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .screen, .sheet, .sheet--center, .modal-veil, .stagger-in > * { animation-duration: 1ms !important; }
+  * { transition-duration: 1ms !important; }
+}
