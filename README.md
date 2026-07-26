@@ -117,10 +117,25 @@ Apple-level interaction refinement — visual design system untouched, behavior 
 - **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY`, then `wrangler pages deploy dist`
 - **Last Updated**: 2026-07-17
 
+## Design-System Refinement (2026-07-26)
+UX flows, structure and logic untouched — UI, bugs, code quality and behavior only:
+- **Light mode + theme engine** (`Aura.Theme`): `html[data-theme="light"]` token layer (luminous morning-sky backgrounds, frosted-white glass, soft-ink text per handoff `light_tokens`); applied at parse time (zero wrong-theme flash); switch crossfades ~250ms (`html.theme-switching` fades `#app` out → swap → in); persisted in `localStorage.aura_theme` **and** account prefs (`mode`) so it follows the user; `<meta theme-color>` synced; covers app, pricing, billing and admin
+- **Settings are 100% functional** (`Aura.Prefs` store with side effects):
+  - *Haptics* → gates real `navigator.vibrate` pulses (phase changes, slider/toggle ticks)
+  - *Sound* → real WebAudio tone engine (`Aura.Tone`): per-phase sine swells (inhale 220Hz / hold 262 / exhale 174) with gain envelopes; in-session sound button toggles it live; stopped on pause/complete
+  - *Aura glow* → `html[data-glow]` drives orb aura strength; *Theme intensity* slider → `--bg-vis` drives ambient background live while dragging
+  - *Appearance* → Dark/Light segmented control in Settings
+- **Orb color transitions fixed**: gradients can't interpolate, so each blob carries an `.orb-fade` overlay — next phase's gradient fades in over it (600–1200ms, ease-in-out, scaled to phase length), then promotes to the base layer; box-shadows ease natively; same-phase renders skip color work entirely (`data-phase` guard)
+- **Guided-journey bug fixed (was: "Body Scan missing under Sleep")**: programs now carry an `intents` column (migration `0002`, e.g. body-scan → `sleep,stress,calm`); category chips filter on intents *or* display tag — Sleep now correctly lists 4-7-8 Unwind, Twilight Descent **and** Body Scan (verified via API + jsdom UI test)
+- **Swipe-back navigation**: iOS-style left-edge gesture on all back-capable routes (`BACK_TARGET` map) — follows the finger with resistance + fade, commits past 35% width or on a fast flick, springs back otherwise; vertical-scroll intent bails out; blocked inside sessions and open modals
+- **Return-Home resilience**: router now probes `/auth/me` once before bouncing an unauthenticated-looking user to welcome — recovers cleanly when local user state is lost while the auth cookie/token is still valid (this was the reported "Return Home lands on sign-in" failure mode; jsdom repro passes)
+- **Code cleanup**: ~26 hardcoded color literals replaced with theme tokens (`--hairline`, `--ink-*`, `--dot-dim`, `--bar-empty`, `--veil-bg`, …); light-safe `.wordmark-grad`; shared `screenHeader` / `wireBack` / `loadingScreen` helpers; missing violet background variant added for both themes
+- **Last Updated**: 2026-07-26
+
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
 - Email notifications (receipts, dunning) and password reset
-- Haptics/audio guidance toggles are stored but not wired to real device APIs
+- Reminders toggle is persisted but push/local notifications need a service worker + permission flow
 - Team/family plans, proration on mid-cycle upgrades
 
 ## Recommended Next Steps

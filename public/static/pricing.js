@@ -65,7 +65,7 @@
             <div style="flex:1;margin-bottom:24px">
               ${p.features.map((f) => `<div class="feat-row"><span style="color:#34D399;flex-shrink:0;margin-top:1px">${icon('check', 15)}</span>${f}</div>`).join('')}
             </div>
-            <button class="${p.id === 'free' ? 'btn-ghost' : 'btn-primary'}" data-buy="${p.id}" ${meta.popular ? '' : p.id !== 'free' ? 'style="background:rgba(255,255,255,0.1);box-shadow:none;border:1px solid rgba(255,255,255,0.18)"' : ''}>${meta.cta}</button>
+            <button class="${p.id === 'free' ? 'btn-ghost' : 'btn-primary'}" data-buy="${p.id}" ${meta.popular ? '' : p.id !== 'free' ? 'style="background:var(--glass-heavy);box-shadow:none;border:1px solid rgba(255,255,255,0.18)"' : ''}>${meta.cta}</button>
           </article>`;
         }).join('')}
       </section>
@@ -86,7 +86,7 @@
             ['Deep analytics', '—', '✓', '✓ + exports'],
             ['Spatial soundscapes', '—', '—', '✓'],
           ].map(([f, a, b, c]) => `
-          <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:13px;align-items:center">
+          <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;padding:11px 0;border-bottom:1px solid var(--hairline-soft);font-size:13px;align-items:center">
             <span style="color:var(--text-secondary)">${f}</span>
             <span style="text-align:center;color:var(--text-disabled)">${a}</span>
             <span style="text-align:center;color:#A78BFA;font-weight:500">${b}</span>

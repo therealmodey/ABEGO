@@ -1,8 +1,34 @@
 // AURA main app — hash-routed SPA replicating the design's 25-screen flow
 (function () {
   'use strict';
-  const { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal } = window.Aura;
+  const { api, AuraState, Theme, Prefs, haptic, Tone, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal } = window.Aura;
   const root = document.getElementById('app');
+
+  // Back target for each route (drives swipe-back + shared back handling)
+  const BACK_TARGET = {
+    stats: 'home', programs: 'home', history: 'stats', profile: 'home',
+    settings: 'home', mood: 'home', how: 'welcome',
+  };
+
+  // ---------- Shared UI fragments (extracted from repeated route markup) ----------
+  // Standard list-screen header: back button + overline title + right slot.
+  function screenHeader(title, opts) {
+    opts = opts || {};
+    const right = opts.right || '<span style="width:40px"></span>';
+    return `<header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:${opts.mb || 24}px">
+        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <span class="overline">${title}</span>${right}
+      </header>`;
+  }
+  // Wire the standard back button; target defaults to the route's BACK_TARGET.
+  function wireBack(target) {
+    const b = document.getElementById('back-btn');
+    if (b) b.onclick = () => go(target || BACK_TARGET[(location.hash || '#').slice(1).split('?')[0]] || 'home');
+  }
+  // Loading placeholder: the pulsing orb IS the loader (never a static spinner).
+  function loadingScreen(hue) {
+    return `${bgHTML(hue)}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
+  }
 
   // ---------- Router with crossfade leave/enter transitions ----------
   const routes = {};
@@ -14,11 +40,27 @@
     if (location.hash === target) route();
     else location.hash = target;
   }
+  // One-shot cookie-session recovery: local user state can be lost (Safari
+  // ITP / storage eviction / cross-tab) while the httpOnly auth cookie is
+  // still valid — every API call keeps working, but the guard would bounce
+  // the user to welcome. Probe /auth/me once before giving up.
+  let authProbe = null; // null = not tried, 'pending' = in flight, 'done' = resolved
   function route() {
     const h = (location.hash || '#splash').slice(1).split('?')[0];
     const user = AuraState.user;
     const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'how', ''];
-    if (!user && !publicRoutes.includes(h)) return go('welcome');
+    if (!user && !publicRoutes.includes(h)) {
+      if (authProbe === 'pending') return; // probe will re-route when it lands
+      if (authProbe === null) {
+        authProbe = 'pending';
+        root.innerHTML = loadingScreen();
+        api.get('/auth/me')
+          .then(({ data }) => { AuraState.user = data.user; authProbe = 'done'; route(); })
+          .catch(() => { authProbe = 'done'; go('welcome'); });
+        return;
+      }
+      return go('welcome');
+    }
     const token = ++navToken;
     const leaving = root.querySelector('.screen');
     const renderNext = () => {
@@ -35,6 +77,77 @@
   }
   window.addEventListener('hashchange', route);
 
+  // ---------- Swipe-back gesture (iOS-style) ----------
+  // Left-edge horizontal drag follows the finger; commit past 35% width
+  // (or a fast flick), otherwise spring back. Only on routes that have a
+  // logical back target — never during a session or inside modals.
+  (function swipeBack() {
+    const EDGE = 28;            // px from left edge that arms the gesture
+    const COMMIT_RATIO = 0.35;  // fraction of width to commit
+    const FLICK_VX = 0.55;      // px/ms — fast flick commits regardless
+    let startX = 0, startY = 0, startT = 0, dx = 0, active = false, decided = false, screen = null;
+
+    function currentBack() {
+      const h = (location.hash || '#').slice(1).split('?')[0];
+      return BACK_TARGET[h] || null;
+    }
+
+    document.addEventListener('touchstart', (e) => {
+      if (!currentBack() || document.body.classList.contains('modal-open')) return;
+      const t = e.touches[0];
+      if (t.clientX > EDGE) return;
+      screen = root.querySelector('.screen');
+      if (!screen || screen.classList.contains('screen--leaving')) return;
+      startX = t.clientX; startY = t.clientY; startT = e.timeStamp;
+      dx = 0; active = true; decided = false;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!active || !screen) return;
+      const t = e.touches[0];
+      dx = Math.max(0, t.clientX - startX);
+      const dy = Math.abs(t.clientY - startY);
+      if (!decided) {
+        if (dy > 12 && dy > dx) { active = false; return; } // vertical intent — bail
+        if (dx > 10) { decided = true; screen.classList.add('screen--swiping'); }
+        else return;
+      }
+      // follow the finger with slight resistance + fade
+      const w = window.innerWidth;
+      screen.style.transform = `translateX(${dx * 0.92}px)`;
+      screen.style.opacity = String(Math.max(0.4, 1 - (dx / w) * 0.7));
+    }, { passive: true });
+
+    function finish(e) {
+      if (!active || !screen) { active = false; return; }
+      active = false;
+      if (!decided) { screen = null; return; }
+      const w = window.innerWidth;
+      const vx = dx / Math.max(1, (e.timeStamp - startT));
+      const commit = dx > w * COMMIT_RATIO || (vx > FLICK_VX && dx > 48);
+      const el = screen; screen = null;
+      el.classList.remove('screen--swiping');
+      if (commit) {
+        const back = currentBack();
+        el.classList.add('screen--swipe-commit');
+        el.style.transform = `translateX(${w}px)`;
+        el.style.opacity = '0';
+        haptic(6);
+        setTimeout(() => { if (back) go(back); }, 170);
+      } else {
+        el.classList.add('screen--swipe-cancel');
+        el.style.transform = 'translateX(0)';
+        el.style.opacity = '1';
+        setTimeout(() => {
+          el.classList.remove('screen--swipe-cancel');
+          el.style.transform = ''; el.style.opacity = '';
+        }, 280);
+      }
+    }
+    document.addEventListener('touchend', finish, { passive: true });
+    document.addEventListener('touchcancel', finish, { passive: true });
+  })();
+
   // Onboarding local state
   const ob = { stress: 6, goal: 'relax', length: 5, sound: true, haptics: true, reminders: false };
 
@@ -44,7 +157,7 @@
     <section class="screen" style="align-items:center;justify-content:center">
       <div style="animation:auraBreatheSlow 6s ease-in-out infinite">${orbHTML(280, 'idle')}</div>
       <div style="position:absolute;bottom:90px;text-align:center">
-        <h1 style="font-size:32px;font-weight:200;letter-spacing:20px;padding-left:20px;background:linear-gradient(135deg,#fff,#22D3EE);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">AURA</h1>
+        <h1 class="wordmark-grad" style="font-size:32px;font-weight:200;letter-spacing:20px;padding-left:20px">AURA</h1>
         <p style="font-size:11px;letter-spacing:6px;color:var(--text-tertiary);margin-top:12px;text-transform:uppercase">breathe · restore</p>
       </div>
     </section>`;
@@ -59,14 +172,14 @@
       <div style="flex:1;display:flex;align-items:center;justify-content:center">${orbHTML(240, 'idle')}</div>
       <div style="text-align:center;padding-bottom:32px">
         <h1 style="font-size:32px;font-weight:600;letter-spacing:-0.5px;line-height:1.25;margin-bottom:14px">Breathe with<br/>intention.</h1>
-        <p style="font-size:15px;color:rgba(255,255,255,0.55);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath — calmer in seconds, clearer in minutes.</p>
+        <p style="font-size:15px;color:var(--ink-55);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath — calmer in seconds, clearer in minutes.</p>
         <button class="btn-primary" id="begin-btn">Begin</button>
         <button style="margin-top:18px;font-size:14px;color:var(--text-tertiary)" id="login-link">I already have an account</button>
         <nav style="display:flex;gap:8px;justify-content:center;margin-top:28px" aria-label="Onboarding progress">
           <span style="width:20px;height:5px;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
         </nav>
       </div>
     </section>`;
@@ -144,10 +257,10 @@
       <div style="padding-bottom:24px">
         <button class="btn-primary" id="next-btn">Continue</button>
         <nav style="display:flex;gap:8px;justify-content:center;margin-top:24px">
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
           <span style="width:20px;height:5px;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.2)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
+          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
         </nav>
       </div>
     </section>`;
@@ -228,7 +341,7 @@
       <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;text-align:center;margin-bottom:30px">Make it feel<br/>alive.</h1>
       <div class="glass" style="padding:8px 20px">
         ${rows.map((r) => `
-        <div style="display:flex;align-items:center;gap:14px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+        <div style="display:flex;align-items:center;gap:14px;padding:16px 0;border-bottom:1px solid var(--hairline-soft)">
           <div style="width:8px;height:8px;border-radius:50%;background:${r.color};box-shadow:0 0 12px ${r.color}"></div>
           <div style="flex:1"><div style="font-size:15px;font-weight:500">${r.label}</div>
           <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">${r.desc}</div></div>
@@ -265,13 +378,13 @@
     <section class="screen" id="home-screen">
       <header style="padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center">
         <button class="btn-icon" id="profile-btn" aria-label="Profile"><span style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#22D3EE);display:block"></span></button>
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:rgba(255,255,255,0.6);letter-spacing:1px;text-transform:uppercase">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-60);letter-spacing:1px;text-transform:uppercase">
           <span class="pulse-dot" style="background:#34D399;box-shadow:0 0 8px #34D399"></span> Ready
         </div>
         <button class="btn-icon" id="settings-btn" aria-label="Settings">${icon('settings', 18)}</button>
       </header>
       <div style="padding:24px 32px 0">
-        <p style="font-size:13px;color:rgba(255,255,255,0.5);margin-bottom:4px">${greet}, ${u.name || 'friend'}</p>
+        <p style="font-size:13px;color:var(--ink-50);margin-bottom:4px">${greet}, ${u.name || 'friend'}</p>
         <h1 style="font-size:22px;font-weight:500;letter-spacing:-0.3px">Let's find your calm.</h1>
       </div>
       <div style="flex:1;display:flex;align-items:center;justify-content:center">
@@ -284,19 +397,19 @@
         <button class="glass" id="suggestion-card" style="width:100%;padding:14px 16px;display:flex;align-items:center;gap:12px;text-align:left">
           <span style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(124,58,237,0.4),rgba(34,211,238,0.4));display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 16px rgba(124,58,237,0.35)">${icon('spark', 16)}</span>
           <span style="flex:1"><span style="display:block;font-size:13px;font-weight:500;margin-bottom:2px">4-7-8 · Deep Unwind</span>
-          <span style="display:block;font-size:11px;color:rgba(255,255,255,0.55)">Tuned to your ${hour >= 18 ? 'evening' : 'daytime'} stress · ${u.sessionLength || 5} min</span></span>
-          <span style="font-size:12px;color:rgba(255,255,255,0.5)">Change</span>
+          <span style="display:block;font-size:11px;color:var(--ink-55)">Tuned to your ${hour >= 18 ? 'evening' : 'daytime'} stress · ${u.sessionLength || 5} min</span></span>
+          <span style="font-size:12px;color:var(--ink-50)">Change</span>
         </button>
       </div>
       <nav style="padding:0 24px 42px;display:flex;align-items:center;justify-content:space-between">
         <button id="insights-btn" style="display:flex;flex-direction:column;align-items:center;gap:6px">
           <span class="btn-icon" style="width:52px;height:52px">${icon('stats', 18)}</span>
-          <span style="font-size:10px;color:rgba(255,255,255,0.5)">Insights</span>
+          <span style="font-size:10px;color:var(--ink-50)">Insights</span>
         </button>
         <button class="fab" id="play-fab" aria-label="Start session">${icon('play', 30, '#fff')}</button>
         <button id="mood-btn" style="display:flex;flex-direction:column;align-items:center;gap:6px">
           <span class="btn-icon" style="width:52px;height:52px">${icon('heart', 18)}</span>
-          <span style="font-size:10px;color:rgba(255,255,255,0.5)">Mood</span>
+          <span style="font-size:10px;color:var(--ink-50)">Mood</span>
         </button>
       </nav>
     </section>`;
@@ -396,7 +509,7 @@
     <section class="screen" id="session-screen">
       <header style="padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center">
         <button class="btn-icon" id="close-btn" aria-label="End session">${icon('close', 17)}</button>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,0.6);letter-spacing:1px;text-transform:uppercase">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-60);letter-spacing:1px;text-transform:uppercase">
           <span class="pulse-dot" style="background:#60A5FA;box-shadow:0 0 8px #60A5FA"></span>
           <span class="tabular">${cfg.name || 'Custom'} · Cycle <span id="cycle-n">1</span> / ${cfg.cycles}</span>
         </div>
@@ -415,7 +528,7 @@
       <div style="padding:0 20px 40px">
         <div class="glass" style="padding:16px 18px;display:flex;align-items:center;gap:16px">
           <span class="tabular" id="elapsed" style="font-size:14px;color:var(--text-secondary)">00:00</span>
-          <div style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);overflow:hidden">
+          <div style="flex:1;height:4px;border-radius:2px;background:var(--glass-heavy);overflow:hidden">
             <div id="progress-bar" style="height:100%;width:0%;border-radius:2px;background:linear-gradient(90deg,#7C3AED,#22D3EE);transition:width 1s linear"></div>
           </div>
           <button class="btn-icon" id="pause-btn" style="width:44px;height:44px" aria-label="Pause">${icon('pause', 17)}</button>
@@ -429,11 +542,14 @@
     const gradFor = { inhale: 'grad-text--blue', hold: 'grad-text--violet', exhale: 'grad-text', idle: 'grad-text' };
 
     function applyPhase() {
-      const durMs = { inhale: cfg.inhale, hold: cfg.hold, exhale: cfg.exhale }[S.phase] * 1000;
-      setOrbPhase(orbEl, S.phase, 0.85, durMs || 4000);
+      const durSec = { inhale: cfg.inhale, hold: cfg.hold, exhale: cfg.exhale }[S.phase] || 4;
+      setOrbPhase(orbEl, S.phase, 0.85, durSec * 1000);
       labelEl.textContent = PHASE[S.phase].label;
       labelEl.className = gradFor[S.phase];
       countEl.textContent = S.phaseLeft;
+      // Sensory guidance — both gated by user prefs (settings toggles)
+      haptic(S.phase === 'hold' ? 12 : 20);
+      Tone.phase(S.phase, durSec);
     }
     applyPhase();
 
@@ -467,11 +583,17 @@
     document.getElementById('close-btn').onclick = async () => {
       if (await confirmModal('End session?', 'Your progress so far will still be saved.', 'End session')) completeSession(false);
     };
-    document.getElementById('sound-btn').onclick = () => toast('Spatial sound — available on device');
+    document.getElementById('sound-btn').onclick = () => {
+      const next = !Prefs.all.sound;
+      Prefs.set({ sound: next });
+      if (!next) Tone.stop();
+      toast(next ? 'Breathing tones on' : 'Breathing tones off');
+    };
 
     async function completeSession(finished) {
       if (S.done) return; S.done = true;
       clearInterval(S.timer);
+      Tone.stop();
       const cyclesDone = finished ? cfg.cycles : Math.max(0, S.cycle - 1);
       try {
         const { data } = await api.post(`/app/sessions/${S.id}/complete`, { cyclesDone, durationSec: S.elapsed });
@@ -485,9 +607,10 @@
   function pauseScreen() {
     const S = sessionCtl; if (!S) return;
     S.paused = true;
+    Tone.stop();
     const m = openModal('modal-veil modal-veil--center', `
       <div class="sheet--center-plain" style="text-align:center;max-width:360px;width:100%;padding:0 24px;animation:auraCenterIn 300ms var(--ease-out) both">
-        <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:24px">
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:9999px;background:var(--glass-medium);border:1px solid var(--glass-border);font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:24px">
           ${icon('pause', 12)} Paused
         </div>
         <h2 style="font-size:26px;font-weight:500;margin-bottom:10px">Take your time.</h2>
@@ -500,8 +623,7 @@
         <button class="btn-primary" data-resume style="margin-bottom:12px">${icon('play', 18)} Resume</button>
         <button class="btn-ghost" data-end>End session</button>
       </div>`);
-    m.veil.style.background = 'rgba(6,8,15,0.55)';
-    m.veil.style.backdropFilter = 'blur(30px)';
+    m.veil.style.backdropFilter = 'blur(30px)'; // veil bg comes from theme token
     m.veil.querySelector('[data-resume]').onclick = () => m.close(() => { S.paused = false; });
     m.veil.querySelector('[data-end]').onclick = () => m.close(() => S.complete(false));
   }
@@ -601,7 +723,7 @@
 
   // ================= 09 STATS / INSIGHTS =================
   routes.stats = async function () {
-    root.innerHTML = `${bgHTML('deep')}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
+    root.innerHTML = loadingScreen('deep');
     let d;
     try { ({ data: d } = await api.get('/app/stats')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -653,7 +775,7 @@
           ${week.map((w) => `
           <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end">
             ${w.today && w.score ? `<span class="tabular" style="font-size:11px;color:#A5F3FC">${w.score}</span>` : ''}
-            <div style="width:100%;max-width:26px;border-radius:6px;height:${Math.max(6, (w.score / maxScore) * 70)}px;background:${w.today ? 'linear-gradient(180deg,#A78BFA,#22D3EE)' : 'rgba(255,255,255,' + (w.score ? '0.22' : '0.08') + ')'};${w.today ? 'box-shadow:0 0 16px rgba(124,58,237,0.5)' : ''}"></div>
+            <div style="width:100%;max-width:26px;border-radius:6px;height:${Math.max(6, (w.score / maxScore) * 70)}px;background:${w.today ? 'linear-gradient(180deg,#A78BFA,#22D3EE)' : (w.score ? 'var(--dot-dim)' : 'var(--bar-empty)')};${w.today ? 'box-shadow:0 0 16px rgba(124,58,237,0.5)' : ''}"></div>
             <span style="font-size:10px;color:var(--text-tertiary)">${w.label}</span>
           </div>`).join('')}
         </div>
@@ -671,7 +793,7 @@
           <div class="overline" style="margin-bottom:10px">Sessions</div>
           <div class="tabular" style="font-size:30px;font-weight:300">${d.sessions}</div>
           <div style="display:flex;gap:4px;margin-top:10px">
-            ${week.map((w) => `<span style="width:7px;height:7px;border-radius:50%;background:${w.score ? 'linear-gradient(135deg,#7C3AED,#22D3EE)' : 'rgba(255,255,255,0.12)'}"></span>`).join('')}
+            ${week.map((w) => `<span style="width:7px;height:7px;border-radius:50%;background:${w.score ? 'linear-gradient(135deg,#7C3AED,#22D3EE)' : 'var(--bar-empty)'}"></span>`).join('')}
           </div>
           <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">${d.streak}-day streak</div>
         </div>
@@ -682,7 +804,7 @@
           <span class="overline">Breath consistency</span>
           <span class="tabular" style="font-size:13px;color:#A5F3FC">${d.consistency}%</span>
         </div>
-        <div style="height:6px;border-radius:3px;background:rgba(255,255,255,0.1);overflow:hidden">
+        <div style="height:6px;border-radius:3px;background:var(--glass-heavy);overflow:hidden">
           <div style="height:100%;width:${d.consistency}%;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></div>
         </div>
       </div>
@@ -708,7 +830,7 @@
 
   // ================= 13 PROGRAMS =================
   routes.programs = async function () {
-    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
+    root.innerHTML = loadingScreen();
     let d;
     try { ({ data: d } = await api.get('/app/programs')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -716,8 +838,18 @@
     let filter = 'All';
     const tagFilters = ['All', 'Stress', 'Sleep', 'Focus', 'Calm'];
 
+    // A program belongs to a filter if the intent key appears in its intents
+    // list (fallback: its display tag). Fixes programs vanishing from
+    // categories they logically belong to (e.g. Body Scan under Sleep).
+    function matchesFilter(p, f) {
+      if (f === 'All') return true;
+      const key = f.toLowerCase();
+      const intents = (p.intents || '').split(',').map((s) => s.trim()).filter(Boolean);
+      return intents.includes(key) || (p.tag || '').toLowerCase() === key;
+    }
+
     function render() {
-      const list = d.programs.filter((p) => filter === 'All' || p.tag === filter);
+      const list = d.programs.filter((p) => matchesFilter(p, filter));
       root.innerHTML = `${bgHTML()}
       <section class="screen screen--scroll" style="padding:24px 20px 40px">
         <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
@@ -821,7 +953,7 @@
 
   // ================= 16 HISTORY =================
   routes.history = async function () {
-    root.innerHTML = `${bgHTML()}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
+    root.innerHTML = loadingScreen();
     let d;
     try { ({ data: d } = await api.get('/app/history')); }
     catch (err) { handleApiError(err); return go('home'); }
@@ -849,13 +981,13 @@
       <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:6px">Your practice</h1>
       <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:22px">${d.summary.sessions} sessions · ${Math.round(d.summary.minutes)} minutes · ${d.summary.streak}-day streak</p>
       <div style="display:flex;gap:5px;margin-bottom:28px" aria-label="Streak strip">
-        ${streakBars.map((lit) => `<span style="flex:1;height:34px;border-radius:5px;background:${lit ? 'linear-gradient(180deg,#7C3AED,#22D3EE)' : 'rgba(255,255,255,0.07)'};${lit ? 'box-shadow:0 0 10px rgba(124,58,237,0.4)' : ''}"></span>`).join('')}
+        ${streakBars.map((lit) => `<span style="flex:1;height:34px;border-radius:5px;background:${lit ? 'linear-gradient(180deg,#7C3AED,#22D3EE)' : 'var(--bar-empty)'};${lit ? 'box-shadow:0 0 10px rgba(124,58,237,0.4)' : ''}"></span>`).join('')}
       </div>
       ${Object.entries(groups).map(([label, items]) => !items.length ? '' : `
       <div class="overline" style="margin:18px 0 12px">${label}</div>
       <div class="glass" style="padding:4px 18px">
         ${items.map((s) => `
-        <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--hairline-soft)">
           <span style="width:32px;height:32px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.85), ${phaseColor(s.calm_score)} 45%, #22D3EE 85%)"></span>
           <span style="flex:1"><span style="display:block;font-size:13px;font-weight:500">${new Date(s.started_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
           <span style="display:block;font-size:11px;color:var(--text-tertiary);margin-top:2px">${fmtTime(s.duration_sec)} · ${s.program_title || s.pattern}</span></span>
@@ -868,7 +1000,7 @@
 
   // ================= 15 PROFILE =================
   routes.profile = async function () {
-    root.innerHTML = `${bgHTML('violet')}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
+    root.innerHTML = loadingScreen('violet');
     let d, me;
     try {
       [{ data: d }, { data: me }] = await Promise.all([api.get('/app/stats'), api.get('/auth/me')]);
@@ -892,7 +1024,7 @@
       <div style="text-align:center;margin-bottom:28px">
         <div style="position:relative;display:inline-block">
           <span style="display:block;width:92px;height:92px;border-radius:50%;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), #7C3AED 40%, #22D3EE 85%);box-shadow:0 0 40px rgba(124,58,237,0.5)"></span>
-          ${u.plan !== 'free' ? `<span style="position:absolute;bottom:0;right:-4px;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#22D3EE);display:flex;align-items:center;justify-content:center;border:2px solid #0B0F1A">${icon('spark', 13)}</span>` : ''}
+          ${u.plan !== 'free' ? `<span style="position:absolute;bottom:0;right:-4px;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#22D3EE);display:flex;align-items:center;justify-content:center;border:2px solid var(--bg-primary)">${icon('spark', 13)}</span>` : ''}
         </div>
         <h1 style="font-size:22px;font-weight:600;margin-top:16px">${u.name || 'You'}</h1>
         <p style="font-size:12px;color:var(--text-tertiary);margin-top:4px">${planLabel} · ${u.email}</p>
@@ -938,10 +1070,16 @@
     try { ({ data: me } = await api.get('/auth/me')); AuraState.user = { ...AuraState.user, ...me.user }; }
     catch (err) { handleApiError(err); return go('home'); }
     const u = me.user;
-    const prefs = Object.assign({ sound: true, haptics: true, glow: 'medium', reminders: false, adaptive: true, theme: 72 }, u.prefs);
+    // Merge server prefs into the local functional store so behavior
+    // (haptics/sound/glow/theme) follows the account everywhere.
+    const prefs = Prefs.set(u.prefs || {});
+    const isLight = Theme.mode === 'light';
     const planLabel = u.plan === 'premium' ? 'AURA Premium' : u.plan === 'pro' ? 'AURA Pro' : 'Free plan';
 
-    function save() { api.put('/app/profile', { prefs }).catch((err) => handleApiError(err)); }
+    function save(patch) {
+      Object.assign(prefs, Prefs.set(patch || {}));
+      api.put('/app/profile', { prefs }).catch((err) => handleApiError(err));
+    }
 
     root.innerHTML = `${bgHTML()}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
@@ -959,7 +1097,7 @@
       <div class="overline" style="margin-bottom:12px">Sensory</div>
       <div class="glass" style="padding:6px 18px;margin-bottom:24px">
         ${[['sound', 'Spatial Audio', '#60A5FA'], ['haptics', 'Haptics', '#A78BFA']].map(([k, label, color]) => `
-        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
           <span style="width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 10px ${color}"></span>
           <span style="flex:1;font-size:14px">${label}</span>
           <button class="toggle ${prefs[k] ? 'on' : ''}" data-pref="${k}" role="switch" aria-checked="${prefs[k]}" aria-label="${label}"></button>
@@ -975,11 +1113,11 @@
 
       <div class="overline" style="margin-bottom:12px">Practice</div>
       <div class="glass" style="padding:6px 18px;margin-bottom:24px">
-        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
           <span style="flex:1;font-size:14px">Breathing style</span>
           <span style="font-size:13px;color:var(--text-tertiary)">4-7-8</span>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
           <span style="flex:1;font-size:14px">Daily reminder</span>
           <button class="toggle ${prefs.reminders ? 'on' : ''}" data-pref="reminders" role="switch" aria-checked="${prefs.reminders}" aria-label="Daily reminder"></button>
         </div>
@@ -990,10 +1128,17 @@
       </div>
 
       <div class="overline" style="margin-bottom:12px">Ambience</div>
-      <div class="glass" style="padding:18px;margin-bottom:24px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+      <div class="glass" style="padding:6px 18px 18px;margin-bottom:24px">
+        <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
+          <span style="width:7px;height:7px;border-radius:50%;background:${isLight ? '#F59E0B' : '#A78BFA'};box-shadow:0 0 10px ${isLight ? '#F59E0B' : '#A78BFA'}"></span>
+          <span style="flex:1;font-size:14px">Appearance</span>
+          <span style="display:flex;gap:6px" id="mode-seg" role="radiogroup" aria-label="Appearance">
+            ${['dark', 'light'].map((mo) => `<button class="chip ${Theme.mode === mo ? 'selected' : ''}" data-mode="${mo}" role="radio" aria-checked="${Theme.mode === mo}" style="padding:7px 16px;font-size:12px;text-transform:capitalize">${mo}</button>`).join('')}
+          </span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin:15px 0 12px">
           <span style="font-size:14px">Theme intensity</span>
-          <span class="tabular slider-val" id="theme-val" style="font-size:13px;color:#A5F3FC">${prefs.theme}%</span>
+          <span class="tabular slider-val" id="theme-val" style="font-size:13px;color:${isLight ? '#0891B2' : '#A5F3FC'}">${prefs.theme}%</span>
         </div>
         <input type="range" min="0" max="100" value="${prefs.theme}" class="aura-slider" id="theme-slider" aria-label="Theme intensity">
       </div>
@@ -1004,12 +1149,36 @@
     document.querySelectorAll('[data-pref]').forEach((t) => t.onclick = () => {
       const k = t.dataset.pref;
       if (k === 'adaptive' && u.plan === 'free') return upgradeModal('Adaptive pacing learns your rhythm and adjusts each session — part of AURA Pro.');
-      prefs[k] = !prefs[k]; t.classList.toggle('on'); save();
+      t.classList.toggle('on');
+      t.setAttribute('aria-checked', t.classList.contains('on'));
+      save({ [k]: !prefs[k] });
+      haptic(6);
     });
-    document.querySelectorAll('[data-glow]').forEach((b) => b.onclick = () => { prefs.glow = b.dataset.glow; save(); routes.settings(); });
+    // Glow steps: update dots in place (no full re-render) + live side effect
+    document.querySelectorAll('[data-glow]').forEach((b) => b.onclick = () => {
+      save({ glow: b.dataset.glow });
+      document.querySelectorAll('[data-glow]').forEach((x) => {
+        const on = x.dataset.glow === b.dataset.glow;
+        x.style.background = on ? 'linear-gradient(135deg,#7C3AED,#22D3EE)' : 'rgba(128,128,160,0.25)';
+        x.style.boxShadow = on ? '0 0 10px rgba(124,58,237,0.6)' : 'none';
+      });
+      haptic(6);
+    });
+    // Appearance: instant-but-smooth global switch, persisted with prefs
+    document.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => {
+      if (b.dataset.mode === Theme.mode) return;
+      Theme.set(b.dataset.mode, true);
+      save({ mode: b.dataset.mode });
+      haptic(6);
+      // re-render after the crossfade so orb + accents pick up light physics
+      setTimeout(() => routes.settings(), 300);
+    });
     attachSlider(document.getElementById('theme-slider'), {
-      onMove: (v) => setSliderVal(document.getElementById('theme-val'), v + '%'),
-      onCommit: (v) => { prefs.theme = v; save(); },
+      onMove: (v) => {
+        setSliderVal(document.getElementById('theme-val'), v + '%');
+        document.documentElement.style.setProperty('--bg-vis', String(0.35 + (v / 100) * 0.65));
+      },
+      onCommit: (v) => save({ theme: v }),
     });
   };
 

@@ -42,7 +42,7 @@ app.get('/programs', async (c) => {
   let programs = cacheGet<any[]>(cacheKey)
   if (!programs) {
     const { results } = await c.env.DB.prepare(
-      'SELECT id, slug, title, category, tag, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new FROM programs WHERE active = 1 ORDER BY sort_order'
+      'SELECT id, slug, title, category, tag, intents, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new FROM programs WHERE active = 1 ORDER BY sort_order'
     ).all()
     programs = results as any[]
     cacheSet(cacheKey, programs, 300)

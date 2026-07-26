@@ -10,10 +10,10 @@ INSERT OR IGNORE INTO subscriptions (user_id, plan, status)
   SELECT id, 'premium', 'active' FROM users WHERE email = 'admin@aura.app';
 
 -- Program library (from design screen 13)
-INSERT OR IGNORE INTO programs (slug, title, category, tag, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new, sort_order) VALUES
-  ('first-breath',      'First Breath',      'beginner',   'Intro',   3,  4, 2, 4,  6, 'inhale', 0, 0, 1),
-  ('box-breathing',     'Box Breathing',     'beginner',   'Calm',    5,  4, 4, 4,  8, 'hold',   0, 0, 2),
-  ('478-unwind',        '4-7-8 Unwind',      'deep_calm',  'Stress',  10, 4, 7, 8,  12,'exhale', 1, 1, 3),
-  ('alternate-nostril', 'Alternate Nostril', 'deep_calm',  'Balance', 8,  5, 3, 6,  10,'idle',   1, 0, 4),
-  ('twilight-descent',  'Twilight Descent',  'sleep_prep', 'Sleep',   15, 4, 6, 9,  14,'hold',   1, 0, 5),
-  ('body-scan',         'Body Scan',         'sleep_prep', 'Release', 12, 5, 4, 8,  12,'exhale', 1, 0, 6);
+INSERT OR IGNORE INTO programs (slug, title, category, tag, intents, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new, sort_order) VALUES
+  ('first-breath',      'First Breath',      'beginner',   'Intro',   'calm',              3,  4, 2, 4,  6, 'inhale', 0, 0, 1),
+  ('box-breathing',     'Box Breathing',     'beginner',   'Calm',    'calm,focus,stress', 5,  4, 4, 4,  8, 'hold',   0, 0, 2),
+  ('478-unwind',        '4-7-8 Unwind',      'deep_calm',  'Stress',  'stress,sleep,calm', 10, 4, 7, 8,  12,'exhale', 1, 1, 3),
+  ('alternate-nostril', 'Alternate Nostril', 'deep_calm',  'Balance', 'focus,calm,stress', 8,  5, 3, 6,  10,'idle',   1, 0, 4),
+  ('twilight-descent',  'Twilight Descent',  'sleep_prep', 'Sleep',   'sleep,calm',        15, 4, 6, 9,  14,'hold',   1, 0, 5),
+  ('body-scan',         'Body Scan',         'sleep_prep', 'Release', 'sleep,stress,calm', 12, 5, 4, 8,  12,'exhale', 1, 0, 6);

@@ -60,7 +60,7 @@
         ${(d.payments && d.payments.length) ? `
         <div class="glass" style="padding:4px 20px">
           ${d.payments.map((p) => `
-          <div style="display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+          <div style="display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
             <span style="width:34px;height:34px;border-radius:10px;flex-shrink:0;background:${p.status === 'succeeded' ? 'rgba(52,211,153,0.15)' : 'rgba(245,158,11,0.15)'};display:flex;align-items:center;justify-content:center;color:${p.status === 'succeeded' ? '#6EE7B7' : '#FCD34D'}">${icon(p.status === 'succeeded' ? 'check' : 'close', 15)}</span>
             <span style="flex:1"><span style="display:block;font-size:13px;font-weight:500">${p.description || 'Payment'}</span>
             <span style="display:block;font-size:11px;color:var(--text-tertiary);margin-top:2px">${fmtDate(p.created_at)} · ${p.provider}</span></span>

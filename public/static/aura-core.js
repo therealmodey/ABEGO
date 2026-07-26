@@ -18,6 +18,99 @@
     clear() { localStorage.removeItem('aura_user'); localStorage.removeItem('aura_token'); },
   };
 
+  // ---------- Theme engine (dark default / light "luminous environment") ----------
+  // Applied at parse time (script is in <body>, before first paint of app UI)
+  // so there is never a wrong-theme flash. Switch crossfades ~250ms.
+  const Theme = {
+    get mode() { return localStorage.getItem('aura_theme') === 'light' ? 'light' : 'dark'; },
+    apply(mode) {
+      document.documentElement.setAttribute('data-theme', mode === 'light' ? 'light' : 'dark');
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', mode === 'light' ? '#F4F6FB' : '#0B0F1A');
+    },
+    set(mode, animate) {
+      localStorage.setItem('aura_theme', mode === 'light' ? 'light' : 'dark');
+      if (!animate) return Theme.apply(mode);
+      // Smooth global switch: fade app out, swap tokens, fade back in (~250ms)
+      const html = document.documentElement;
+      html.classList.add('theme-switching');
+      setTimeout(() => {
+        Theme.apply(mode);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          html.classList.remove('theme-switching');
+        }));
+      }, 130);
+    },
+  };
+  Theme.apply(Theme.mode);
+
+  // ---------- Sensory prefs (functional, not visual-only) ----------
+  // Session code consults these before vibrating / playing tones; the theme
+  // intensity slider drives ambient background opacity; glow steps drive
+  // orb aura via html[data-glow].
+  const Prefs = {
+    _read() { try { return JSON.parse(localStorage.getItem('aura_prefs') || '{}'); } catch { return {}; } },
+    get all() { return Object.assign({ sound: true, haptics: true, glow: 'medium', reminders: false, adaptive: true, theme: 72, mode: Theme.mode }, this._read()); },
+    set(patch) {
+      const next = Object.assign(this._read(), patch);
+      localStorage.setItem('aura_prefs', JSON.stringify(next));
+      Prefs.applySideEffects(next);
+      return next;
+    },
+    applySideEffects(p) {
+      p = p || this.all;
+      if (p.glow) document.documentElement.setAttribute('data-glow', p.glow);
+      if (typeof p.theme === 'number') {
+        document.documentElement.style.setProperty('--bg-vis', String(0.35 + (p.theme / 100) * 0.65));
+      }
+      // Account-level appearance follows the user across devices
+      if (p.mode && p.mode !== Theme.mode) Theme.set(p.mode, false);
+    },
+  };
+  Prefs.applySideEffects();
+
+  // Haptic tick that respects the user's haptics preference
+  function haptic(ms) {
+    if (!Prefs.all.haptics) return;
+    if (navigator.vibrate) { try { navigator.vibrate(ms || 8); } catch (e) {} }
+  }
+
+  // ---------- Breathing tone engine (WebAudio, gated by the sound pref) ----------
+  // Soft sine swells per phase — inhale rises, hold sustains, exhale falls.
+  // Lazy-initialized on first user gesture (autoplay policy safe).
+  const Tone = (() => {
+    let ctx = null, master = null;
+    const FREQ = { inhale: 220, hold: 262, exhale: 174, idle: 196 };
+    function ensure() {
+      if (ctx) { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); return true; }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.0001;
+      master.connect(ctx.destination);
+      return true;
+    }
+    function phase(name, durSec) {
+      if (!Prefs.all.sound || !ensure()) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(FREQ[name] || 196, now);
+      // gentle detune drift for an organic feel
+      osc.detune.setValueAtTime(-6, now);
+      osc.detune.linearRampToValueAtTime(6, now + durSec);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.05, now + Math.min(0.9, durSec * 0.3));
+      g.gain.exponentialRampToValueAtTime(0.0001, now + durSec);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(now); osc.stop(now + durSec + 0.05);
+    }
+    function stop() { if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {}); }
+    return { phase, stop };
+  })();
+
   // ---------- Phase colors (design tokens) ----------
   const PHASE = {
     inhale: { a: '#60A5FA', b: '#22D3EE', glow: 'rgba(96,165,250,0.65)', label: 'Breathe in' },
@@ -25,47 +118,115 @@
     exhale: { a: '#34D399', b: '#22D3EE', glow: 'rgba(52,211,153,0.55)', label: 'Breathe out' },
     idle:   { a: '#7C3AED', b: '#22D3EE', glow: 'rgba(124,58,237,0.6)', label: '' },
   };
+  // Light-physics orb palette (airy translucent mist, per light_tokens handoff)
+  const PHASE_LIGHT = {
+    inhale: { a: '#DDEEFF', b: '#9EC7FF', c: '#60A5FA', glow: 'rgba(96,165,250,0.45)', label: 'Breathe in' },
+    hold:   { a: '#EFE7FF', b: '#C7B4FF', c: '#A78BFA', glow: 'rgba(167,139,250,0.40)', label: 'Hold' },
+    exhale: { a: '#E1F7EC', b: '#B7EDD1', c: '#34D399', glow: 'rgba(52,211,153,0.35)', label: 'Breathe out' },
+    idle:   { a: '#E7DDFF', b: '#B4D8FF', c: '#8B5CF6', glow: 'rgba(124,58,237,0.30)', label: '' },
+  };
   const SCALE = { inhale: 1.18, hold: 1.20, exhale: 0.92, idle: 1.0 };
+
+  // Gradient CSS for the main orb body in the active theme
+  function orbGradients(phase) {
+    if (Theme.mode === 'light') {
+      const p = PHASE_LIGHT[phase] || PHASE_LIGHT.idle;
+      return {
+        glow: p.glow,
+        bodyBg: `radial-gradient(circle at 35% 30%, rgba(255,255,255,1) 0%, ${p.a} 25%, ${p.b} 60%, ${p.c}20 90%)`,
+        bodyShadow: `inset -10px -10px 30px ${p.c}25, inset 10px 15px 30px rgba(255,255,255,0.8), 0 0 60px ${p.glow}`,
+        vaporBg: `radial-gradient(circle at 65% 68%, ${p.c}40 0%, transparent 55%)`,
+      };
+    }
+    const p = PHASE[phase] || PHASE.idle;
+    return {
+      glow: p.glow,
+      bodyBg: `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, ${p.a} 30%, ${p.b} 65%, #1a0f3a 100%)`,
+      bodyShadow: `inset -20px -20px 60px rgba(0,0,0,0.4), inset 15px 20px 40px rgba(255,255,255,0.25), 0 0 80px ${p.glow}`,
+      vaporBg: `radial-gradient(circle at 68% 72%, ${p.b} 0%, transparent 60%)`,
+    };
+  }
 
   // ---------- Orb ----------
   function orbHTML(size, phase, opts) {
     opts = opts || {};
-    const p = PHASE[phase] || PHASE.idle;
+    const g = orbGradients(phase);
     const intensity = opts.intensity != null ? opts.intensity : 0.75;
     const scale = (SCALE[phase] || 1) * (0.85 + intensity * 0.25);
     const aura = opts.showAura === false ? '' :
-      `<div class="orb-aura" style="inset:${-size * 0.6}px;background:radial-gradient(circle, ${p.glow} 0%, transparent 60%)"></div>`;
+      `<div class="orb-aura" style="inset:${-size * 0.6}px;background:radial-gradient(circle, ${g.glow} 0%, transparent 60%)"></div>`;
     const anim = opts.animate === false ? 'style="animation:none"' : '';
+    // .orb-fade children carry the NEXT gradient during phase transitions so
+    // colors flow into each other (gradients can't interpolate natively).
     return `
-    <div class="orb-wrap" data-orb style="width:${size}px;height:${size}px;transform:scale(${scale})">
+    <div class="orb-wrap" data-orb data-phase="${phase}" style="width:${size}px;height:${size}px;transform:scale(${scale})">
       ${aura}
-      <div class="orb-halo" style="background:radial-gradient(circle, transparent 55%, ${p.glow} 62%, transparent 78%)"></div>
-      <div class="orb-blob-a" ${anim} style="background:radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, ${p.a} 30%, ${p.b} 65%, #1a0f3a 100%);box-shadow:inset -20px -20px 60px rgba(0,0,0,0.4), inset 15px 20px 40px rgba(255,255,255,0.25), 0 0 80px ${p.glow}"></div>
-      <div class="orb-blob-b" ${anim} style="background:radial-gradient(circle at 68% 72%, ${p.b} 0%, transparent 60%)"></div>
+      <div class="orb-halo" style="background:radial-gradient(circle, transparent 55%, ${g.glow} 62%, transparent 78%)"></div>
+      <div class="orb-blob-a" ${anim} style="background:${g.bodyBg};box-shadow:${g.bodyShadow}"><div class="orb-fade"></div></div>
+      <div class="orb-blob-b" ${anim} style="background:${g.vaporBg}"><div class="orb-fade"></div></div>
       <div class="orb-specular"></div>
       <div class="orb-spark"></div>
       <div class="orb-innerring"></div>
     </div>`;
   }
 
-  // Update an existing orb in place (phase transition, animated via CSS transitions)
+  // Update an existing orb in place. Colors CROSSFADE via an overlay layer
+  // (600–1200ms ease-in-out) instead of hard-switching gradients; scale
+  // rides the breath duration as before.
   function setOrbPhase(el, phase, intensity, durMs) {
-    const p = PHASE[phase] || PHASE.idle;
+    if (!el) return;
     intensity = intensity != null ? intensity : 0.75;
     const scale = (SCALE[phase] || 1) * (0.85 + intensity * 0.25);
     el.style.transitionDuration = (durMs || 4000) + 'ms';
     el.style.transform = `scale(${scale})`;
+    if (el.dataset.phase === phase) return; // same colors — only scale updates
+    el.dataset.phase = phase;
+    const g = orbGradients(phase);
+
+    // Color crossfade: proportional to the phase length, clamped 600–1200ms
+    const fadeMs = Math.max(600, Math.min(1200, (durMs || 4000) * 0.3));
+
+    // Aura + halo are heavily blurred, so an eased background swap already
+    // reads as a soft flow.
     const aura = el.querySelector('.orb-aura');
-    if (aura) aura.style.background = `radial-gradient(circle, ${p.glow} 0%, transparent 60%)`;
-    const halo = el.querySelector('.orb-halo');
-    if (halo) halo.style.background = `radial-gradient(circle, transparent 55%, ${p.glow} 62%, transparent 78%)`;
-    const a = el.querySelector('.orb-blob-a');
-    if (a) {
-      a.style.background = `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, ${p.a} 30%, ${p.b} 65%, #1a0f3a 100%)`;
-      a.style.boxShadow = `inset -20px -20px 60px rgba(0,0,0,0.4), inset 15px 20px 40px rgba(255,255,255,0.25), 0 0 80px ${p.glow}`;
+    if (aura) {
+      aura.style.transition = `background ${fadeMs}ms ease-in-out`;
+      aura.style.background = `radial-gradient(circle, ${g.glow} 0%, transparent 60%)`;
     }
-    const b = el.querySelector('.orb-blob-b');
-    if (b) b.style.background = `radial-gradient(circle at 68% 72%, ${p.b} 0%, transparent 60%)`;
+    const halo = el.querySelector('.orb-halo');
+    if (halo) {
+      halo.style.transition = `background ${fadeMs}ms ease-in-out`;
+      halo.style.background = `radial-gradient(circle, transparent 55%, ${g.glow} 62%, transparent 78%)`;
+    }
+
+    // Body + vapor: fade the NEW gradient in on an overlay, then promote it
+    // to the base layer once fully opaque. No hard switch is ever visible.
+    crossfadeLayer(el.querySelector('.orb-blob-a'), g.bodyBg, fadeMs, g.bodyShadow);
+    crossfadeLayer(el.querySelector('.orb-blob-b'), g.vaporBg, fadeMs);
+  }
+
+  function crossfadeLayer(layer, nextBg, fadeMs, nextShadow) {
+    if (!layer) return;
+    let fade = layer.querySelector('.orb-fade');
+    if (!fade) { fade = document.createElement('div'); fade.className = 'orb-fade'; layer.appendChild(fade); }
+    if (layer._fadeTimer) clearTimeout(layer._fadeTimer);
+    fade.style.transition = 'none';
+    fade.style.opacity = '0';
+    fade.style.background = nextBg;
+    // box-shadow interpolates natively — ease it alongside the fade
+    if (nextShadow) {
+      layer.style.transition = `box-shadow ${fadeMs}ms ease-in-out`;
+      layer.style.boxShadow = nextShadow;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fade.style.transition = `opacity ${fadeMs}ms ease-in-out`;
+      fade.style.opacity = '1';
+      layer._fadeTimer = setTimeout(() => {
+        layer.style.background = nextBg; // promote to base
+        fade.style.transition = 'none';
+        fade.style.opacity = '0';
+      }, fadeMs + 40);
+    }));
   }
 
   // ---------- Progress ring ----------
@@ -162,7 +323,7 @@
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       if (pending !== null) { const v = pending; pending = null; if (onMove) onMove(v, input); }
       if (onCommit) onCommit(+input.value, input);
-      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+      haptic(8); // respects the haptics preference
     }
     input.addEventListener('pointerdown', start, { passive: true });
     input.addEventListener('pointerup', end, { passive: true });
@@ -244,5 +405,5 @@
     toast((data && data.error) || fallback || 'Something went wrong.');
   }
 
-  window.Aura = { api, AuraState, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal };
+  window.Aura = { api, AuraState, Theme, Prefs, haptic, Tone, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal };
 })();
