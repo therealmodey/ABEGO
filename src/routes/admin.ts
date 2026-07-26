@@ -91,7 +91,7 @@ admin.get('/analytics', async (c) => {
   const cached = cacheGet<object>('admin:analytics')
   if (cached) return c.json(cached)
 
-  const [users, sessions, revenue, plans, signups, recentActivity] = await Promise.all([
+  const [users, sessions, revenue, plans, signups, recentActivity, sessionsByDay, programPerf, liveSessions] = await Promise.all([
     c.env.DB.prepare(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
@@ -121,9 +121,35 @@ admin.get('/analytics', async (c) => {
       `SELECT a.action, a.created_at, u.email FROM activity_logs a LEFT JOIN users u ON u.id = a.user_id
        ORDER BY a.created_at DESC LIMIT 15`
     ).all(),
+    // Sessions × calm score per day — powers the main overview chart (additive)
+    c.env.DB.prepare(
+      `SELECT date(started_at) AS day, COUNT(*) AS n,
+              ROUND(AVG(CASE WHEN completed = 1 THEN calm_score END)) AS avg_calm
+       FROM sessions WHERE started_at > datetime('now','-14 days') GROUP BY day ORDER BY day`
+    ).all(),
+    // Program performance — usage, completion %, avg calm delta per program (additive)
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, p.category, p.tag, p.phase, p.duration_min, p.is_premium,
+              COUNT(s.id) AS starts,
+              SUM(CASE WHEN s.completed = 1 THEN 1 ELSE 0 END) AS completions,
+              ROUND(AVG(CASE WHEN s.completed = 1 THEN s.calm_delta END), 1) AS avg_calm_delta,
+              ROUND(AVG(CASE WHEN s.completed = 1 THEN s.consistency END)) AS avg_consistency
+       FROM programs p LEFT JOIN sessions s ON s.program_id = p.id
+       WHERE p.active = 1 GROUP BY p.id ORDER BY starts DESC`
+    ).all(),
+    // In-flight sessions (started, not completed, < 30 min old) — mission-control style (additive)
+    c.env.DB.prepare(
+      `SELECT s.id, s.pattern, s.inhale, s.hold, s.exhale, s.cycles_planned, s.mood_before, s.started_at, u.email
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.completed = 0 AND s.started_at > datetime('now','-30 minutes')
+       ORDER BY s.started_at DESC LIMIT 12`
+    ).all(),
   ])
 
-  const payload = { users, sessions, revenue, plans: plans.results, signups: signups.results, recentActivity: recentActivity.results }
+  const payload = {
+    users, sessions, revenue, plans: plans.results, signups: signups.results, recentActivity: recentActivity.results,
+    sessionsByDay: sessionsByDay.results, programPerf: programPerf.results, liveSessions: liveSessions.results,
+  }
   cacheSet('admin:analytics', payload, 30)
   return c.json(payload)
 })

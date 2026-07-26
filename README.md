@@ -132,6 +132,19 @@ UX flows, structure and logic untouched — UI, bugs, code quality and behavior 
 - **Code cleanup**: ~26 hardcoded color literals replaced with theme tokens (`--hairline`, `--ink-*`, `--dot-dim`, `--bar-empty`, `--veil-bg`, …); light-safe `.wordmark-grad`; shared `screenHeader` / `wireBack` / `loadingScreen` helpers; missing violet background variant added for both themes
 - **Last Updated**: 2026-07-26
 
+## Super Command Centre — Admin Redesign (2026-07-26)
+Full replacement of the admin dashboard UI per the `design_handoff_aura_system` handoff (ZIP = source of truth). Routes, data sources and feature logic unchanged — UI layer only:
+- **New shell**: 240px glass sidebar (brand orb mark, violet-glow active nav state, user pod footer) + 64px sticky topbar (breadcrumbs, live "Prod" env pill, theme toggle, avatar) + content canvas with ambient radial-gradient background and 48px grid overlay
+- **Design tokens** (`--adm-*`): dark `#080B14` bg / glass panels / `#8B5CF6→#22D3EE` accent; light variant under `html[data-theme="light"]` — switches instantly via the existing `Aura.Theme` engine, no artifacts
+- **Data visualization (SVG, zero deps)**: bezier-smoothed sparklines with area-gradient fills on KPI cards, dual-series line chart (sessions × avg calm, 14 days), gradient donut (plan mix), gradient meters (top programs / program performance), pulsing live-session dots
+- **Views (same hash routes)**: `#/dashboard` Overview (4 KPIs + Sessions×Calm chart + plan donut + live sessions + top programs + activity), `#/users` (KPIs, debounced search, avatar table rows, promote/demote/suspend/reactivate/delete via confirm modals, pagination), `#/analytics` (KPIs + program performance meters + 100-event stream), `#/content` Programs (card grid with per-program starts/completion/calm Δ stats + instant `is_premium`/`is_new`/`active` toggles), `#/audit` (grid table)
+- **Analytics API extended additively** (`GET /api/admin/analytics`): `sessionsByDay` (14d counts + avg calm), `programPerf` (starts/completions/avg calm delta/consistency per program), `liveSessions` (incomplete, <30 min) — all existing payload keys untouched
+- **Motion**: staggered fade-rise entry on panels (`sccIn`), breathing loading orb, pulse dots; `prefers-reduced-motion` respected
+- **Responsive**: desktop-primary; ≤1180px grids collapse, ≤900px sidebar becomes a 64px icon rail
+- **Cleanup**: all legacy admin CSS (`admin-*`, `a-badge`, `a-act`, `a-switch`, tiles, panel v2) removed; shared `.badge` classes retained for the user app
+- **Verified**: jsdom E2E (admin login → all 5 views render, search filter, program-toggle round-trip, audit rows, theme toggle) + all 4 prior regression suites PASS; zero console errors
+- **Last Updated**: 2026-07-26
+
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
 - Email notifications (receipts, dunning) and password reset
