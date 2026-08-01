@@ -132,18 +132,40 @@ UX flows, structure and logic untouched — UI, bugs, code quality and behavior 
 - **Code cleanup**: ~26 hardcoded color literals replaced with theme tokens (`--hairline`, `--ink-*`, `--dot-dim`, `--bar-empty`, `--veil-bg`, …); light-safe `.wordmark-grad`; shared `screenHeader` / `wireBack` / `loadingScreen` helpers; missing violet background variant added for both themes
 - **Last Updated**: 2026-07-26
 
-## Super Command Centre — Admin Redesign (2026-07-26)
-Full replacement of the admin dashboard UI per the `design_handoff_aura_system` handoff (ZIP = source of truth). Routes, data sources and feature logic unchanged — UI layer only:
-- **New shell**: 240px glass sidebar (brand orb mark, violet-glow active nav state, user pod footer) + 64px sticky topbar (breadcrumbs, live "Prod" env pill, theme toggle, avatar) + content canvas with ambient radial-gradient background and 48px grid overlay
-- **Design tokens** (`--adm-*`): dark `#080B14` bg / glass panels / `#8B5CF6→#22D3EE` accent; light variant under `html[data-theme="light"]` — switches instantly via the existing `Aura.Theme` engine, no artifacts
-- **Data visualization (SVG, zero deps)**: bezier-smoothed sparklines with area-gradient fills on KPI cards, dual-series line chart (sessions × avg calm, 14 days), gradient donut (plan mix), gradient meters (top programs / program performance), pulsing live-session dots
-- **Views (same hash routes)**: `#/dashboard` Overview (4 KPIs + Sessions×Calm chart + plan donut + live sessions + top programs + activity), `#/users` (KPIs, debounced search, avatar table rows, promote/demote/suspend/reactivate/delete via confirm modals, pagination), `#/analytics` (KPIs + program performance meters + 100-event stream), `#/content` Programs (card grid with per-program starts/completion/calm Δ stats + instant `is_premium`/`is_new`/`active` toggles), `#/audit` (grid table)
-- **Analytics API extended additively** (`GET /api/admin/analytics`): `sessionsByDay` (14d counts + avg calm), `programPerf` (starts/completions/avg calm delta/consistency per program), `liveSessions` (incomplete, <30 min) — all existing payload keys untouched
-- **Motion**: staggered fade-rise entry on panels (`sccIn`), breathing loading orb, pulse dots; `prefers-reduced-motion` respected
-- **Responsive**: desktop-primary; ≤1180px grids collapse, ≤900px sidebar becomes a 64px icon rail
-- **Cleanup**: all legacy admin CSS (`admin-*`, `a-badge`, `a-act`, `a-switch`, tiles, panel v2) removed; shared `.badge` classes retained for the user app
-- **Verified**: jsdom E2E (admin login → all 5 views render, search filter, program-toggle round-trip, audit rows, theme toggle) + all 4 prior regression suites PASS; zero console errors
-- **Last Updated**: 2026-07-26
+## Super Command Centre v2 — Full Admin Rebuild (2026-08-01)
+Complete rebuild of the admin dashboard treating the `handoff3` design ZIP as **full source of truth** — every UI element in the design is implemented, including features with no prior backend (mocked with clearly-defined schemas). The previous 5-view admin is fully replaced.
+
+### 12 views (11 sidebar sections + Settings footer)
+| Route | View | Data |
+|---|---|---|
+| `#/overview` | Overview — 4 KPIs, sessions×calm chart, D7 retention donut, AI adaptation events, geo globe, top programs, system pulse, activity | **real** analytics + mock SCC |
+| `#/live` | Mission Control — 5 live stats, globe, session timeline, phase distribution donut, anomaly boxes, 9-row live session table | mock |
+| `#/ai` | AI Engine — model KPIs, 5 tuning sliders, 5 feature flags, live decision preview (input→model→4·7·8 output), rollout bar, effectiveness A/B chart | mock (PUT stubs audit-logged) |
+| `#/analytics` | Analytics — cohort retention grid, activation funnel, calm-over-time (real D1 footnote), stress↓calm scatter r=0.68, drop-off bars | mock + **real** |
+| `#/biometrics` | Biometrics — HR start-vs-end chart, segment rows, weekly usage heatmap, stress-reduction arc, HRV coherence | mock |
+| `#/programs` | Programs — design cards w/ colored orbs + 3-stat rows + sparklines; **real** `is_premium`/`is_new`/`active` toggles (PUT round-trip), drop-off by program, completion trend | **real** + derived |
+| `#/experiments` | Experiments — featured A/B card w/ winner tag + lift chart, 6-row experiments table w/ confidence bars, status tags | mock |
+| `#/notifications` | Notifications — visual rule builder (WHEN/AND/THEN blocks), iOS lock-screen preview, 8 active rules w/ toggles (PUT stub, audit-logged) | mock |
+| `#/revenue` | Revenue — MRR stacked bars (new/expansion/churn), plan-mix donut merged w/ **real** D1 plans, paywall funnel, LTV by cohort | mock + **real** |
+| `#/health` | System Health — status banner w/ region dots, latency percentiles p50/p95/p99, 10 service rows, sensory reliability donut, by-device bars, incident log w/ codes | mock |
+| `#/users` | Users — **real** D1 table (search `/` key, tier filter, pagination) + design detail panel (zap badge, live-session box, 4 stat boxes, calm trend, activity timeline, Impersonate/Add note/Full profile stubs) + **real** promote/demote/suspend/reactivate/delete w/ confirm modals | **real** + mock enrich |
+| `#/settings` | Settings & Audit — workspace/compliance cards + full **real** audit-log table | **real** |
+
+Legacy hashes still work: `#/dashboard`→overview, `#/content`→programs, `#/audit`→settings.
+
+### New backend layer (`/api/admin/scc/*`)
+- `GET /api/admin/scc/:module` — deterministic mock data for 9 modules (`overview live ai biometrics experiments notifications revenue health analytics`), returns `{module, mock:true, data}`; schema contracts documented in `src/routes/admin.ts` for future real-pipeline integration
+- `PUT /api/admin/scc/ai` — validated AI-config stub (sliders/flags), audit-logged as `ai_config_update`, returns `persisted:false`
+- `PUT /api/admin/scc/notifications/:id` — rule-toggle stub, audit-logged as `notification_rule_toggle`
+- All pre-existing admin endpoints unchanged; nothing in the user app pipeline touched
+
+### Frontend architecture
+- `public/static/admin.js` (~1,670 lines): vanilla-JS SPA — local `AIC_PATHS` icon set (38 SVG icons from the handoff AdminIcon), pure-SVG chart library (multi-series lines, bars, donuts, globe, heatmap, cohort grid, funnel, scatter, stress arc, stacked bars), client-side `sccCache`, ⌘K global search → users view
+- Dark + light mode via existing `Aura.Theme`; staggered `sccIn` panel animations; responsive collapses at 1180px/900px
+- Completeness audit: 192 `scc-*` classes used, 0 missing from CSS; 40/40 handoff design elements verified present
+
+### Verified (2026-08-01)
+jsdom E2E: login → all 12 views render (nav=11, live rows=9, AI sliders=5, heatmap rows=7, experiment rows=6, rules=8, services=10, incidents=5), program-toggle + notification-toggle round-trips, user search/select/detail, audit rows, legacy aliases, theme toggle — **ALL PASS**, zero console errors. All 4 prior regression suites (session flow, state-loss recovery, programs filter, theme engine) PASS.
 
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)

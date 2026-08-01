@@ -194,4 +194,253 @@ admin.put('/programs/:id', async (c) => {
   return c.json({ ok: true })
 })
 
+// ==========================================================================
+// SCC (Super Command Centre) module data — integration-ready endpoints.
+//
+// SCHEMA CONTRACT (per design handoff /tmp/handoff3):
+//   GET /admin/scc/overview      → { retention:{d1,d3,d7,d30}, aiEvents[], geo:{pings[],live}, systemPulse[] }
+//   GET /admin/scc/live          → { stats:{live,inhaling,holding,exhaling,flagged}, timeline[], phaseDist[], anomalies[], sessions[] }
+//   GET /admin/scc/ai            → { model:{version,status}, kpis, sliders[], flags[], preview, rollout, effectiveness:{a[],b[]} }
+//   GET /admin/scc/biometrics    → { kpis, hr:{start[],end[],labels[]}, segments[], heatmap[7][24], arc:{milestones[]}, hrv }
+//   GET /admin/scc/experiments   → { kpis, featured, rows[] }
+//   GET /admin/scc/notifications → { kpis, rules[] }
+//   GET /admin/scc/revenue       → { kpis, mrr:{months[]}, planMix, funnel[], ltv:{cohorts[]} }
+//   GET /admin/scc/health        → { banner, kpis, latency:{p50[],p95[],p99[]}, services[], sensory, devices[], incidents[] }
+//   GET /admin/scc/analytics     → { kpis, cohorts[], funnel[], dropoff[], scatter[] }
+//   PUT /admin/scc/ai            → accepts { sliders?, flags? }  (stub: audit-logged, persistence wired later)
+//   PUT /admin/scc/notifications/:id → accepts { enabled }      (stub: audit-logged, persistence wired later)
+//
+// All numeric series are DETERMINISTIC (genLine formula from handoff) so UI
+// renders stably across reloads. Real telemetry pipelines replace these later.
+// ==========================================================================
+const genLine = (n: number, base: number, vari: number, drift = 0) =>
+  Array.from({ length: n }, (_, i) =>
+    Math.round((base + Math.sin(i * 0.6) * vari * 0.5 + i * drift + Math.cos(i * 1.1) * vari * 0.3) * 10) / 10)
+
+const heatGrid = () => {
+  const g: number[][] = []
+  for (let d = 0; d < 7; d++) {
+    const row: number[] = []
+    for (let h = 0; h < 24; h++) {
+      const peakAM = Math.exp(-Math.pow((h - 8) / 3, 2))
+      const peakPM = Math.exp(-Math.pow((h - 20) / 3, 2))
+      let v = (peakAM * 0.7 + peakPM) * (0.75 + 0.25 * Math.sin(d * 1.3 + h * 0.35))
+      if (d === 0 || d === 6) v *= 0.7
+      row.push(Math.round(Math.max(0, Math.min(1, v)) * 100) / 100)
+    }
+    g.push(row)
+  }
+  return g
+}
+
+const SCC_DATA: Record<string, () => unknown> = {
+  overview: () => ({
+    retention: { pct: 62, bars: [{ l: 'D1', v: 94 }, { l: 'D3', v: 78 }, { l: 'D7', v: 62 }, { l: 'D30', v: 41 }] },
+    aiEvents: [
+      { t: 'Pattern shifted', d: '4·7·8 → 4·4·6 for anxious cohort', ago: '2m', c: 'violet' },
+      { t: 'Stress spike detected', d: '146 users flagged · EU-C', ago: '11m', c: 'amber' },
+      { t: 'Auto-cooldown applied', d: 'Notification pressure reduced 14%', ago: '24m', c: 'cyan' },
+      { t: 'Weight learned', d: 'HR influence ↑ 0.72 for wearable users', ago: '42m', c: 'green' },
+    ],
+    geo: { live: 142, pings: Array.from({ length: 16 }, (_, i) => ({ x: 60 + ((i * 137) % 580), y: 40 + ((i * 89) % 160), hot: i % 5 === 0 })) },
+    systemPulse: [
+      { name: 'API', ms: 82, load: 0.42, ok: true }, { name: 'AI inference', ms: 134, load: 0.58, ok: true },
+      { name: 'Audio CDN', ms: 210, load: 0.74, ok: false }, { name: 'WebSocket', ms: 18, load: 0.31, ok: true },
+      { name: 'Realtime DB', ms: 46, load: 0.39, ok: true },
+    ],
+  }),
+  live: () => ({
+    stats: { live: 142, inhaling: 48, holding: 31, exhaling: 58, flagged: 5 },
+    timeline: genLine(12, 120, 30, 2).map((v) => Math.round(v)),
+    phaseDist: [{ l: 'Inhale', v: 34, c: '#60A5FA' }, { l: 'Hold', v: 22, c: '#A78BFA' }, { l: 'Exhale', v: 41, c: '#34D399' }, { l: 'Rest', v: 3, c: '#64748B' }],
+    anomalies: [
+      { t: 'High stress cluster', d: '5 users · IN-BLR', ago: 'now', sev: 'amber' },
+      { t: 'Session drop-off', d: '11 exits at cycle 2 · 4-7-8', ago: '1m', sev: 'amber' },
+      { t: 'Audio failure', d: 'iOS 26 · 0.4% affected', ago: '3m', sev: 'red' },
+    ],
+    sessions: [
+      { name: 'Maya O.', sid: 'ses_74a2', region: 'NYC', pattern: '4-7-8', phase: 'inhale', stress: 0.62, calm: 74, hr: 62, dur: '4:12', hot: false },
+      { name: 'Priya S.', sid: 'ses_91bc', region: 'Mumbai', pattern: '4-7-8', phase: 'hold', stress: 0.81, calm: 42, hr: 78, dur: '1:44', hot: true },
+      { name: 'Jonas K.', sid: 'ses_3fe1', region: 'Berlin', pattern: 'Box', phase: 'exhale', stress: 0.34, calm: 81, hr: 58, dur: '6:03', hot: false },
+      { name: 'Aiko T.', sid: 'ses_bb02', region: 'Tokyo', pattern: '4-4-4', phase: 'inhale', stress: 0.48, calm: 68, hr: 64, dur: '2:51', hot: false },
+      { name: 'Leo M.', sid: 'ses_c4d9', region: 'SF', pattern: '5-0-5', phase: 'exhale', stress: 0.29, calm: 86, hr: 55, dur: '7:18', hot: false },
+      { name: 'Sara B.', sid: 'ses_08aa', region: 'London', pattern: '4-7-8', phase: 'hold', stress: 0.74, calm: 51, hr: 72, dur: '0:58', hot: true },
+      { name: 'Omar F.', sid: 'ses_5e77', region: 'Dubai', pattern: 'Box', phase: 'rest', stress: 0.41, calm: 77, hr: 60, dur: '5:22', hot: false },
+      { name: 'Nina R.', sid: 'ses_d210', region: 'Oslo', pattern: '4-2-6', phase: 'inhale', stress: 0.55, calm: 63, hr: 66, dur: '3:07', hot: false },
+      { name: 'Kai W.', sid: 'ses_66f3', region: 'Sydney', pattern: '4-4-6', phase: 'exhale', stress: 0.38, calm: 79, hr: 59, dur: '4:49', hot: false },
+    ],
+  }),
+  ai: () => ({
+    model: { version: 'aura-2.4.1', status: 'Stable' },
+    kpis: { adaptations: 42180, effectiveness: 0.82, latencyMs: 134 },
+    sliders: [
+      { id: 'stress_sensitivity', label: 'Stress sensitivity', desc: 'How quickly patterns shift under detected stress', v: 0.68, c: '#F59E0B', hint: 'Aggressive' },
+      { id: 'adaptation_speed', label: 'Adaptation speed', desc: 'Rate of pattern transition between cycles', v: 0.45, c: '#8B5CF6', hint: 'Balanced' },
+      { id: 'hr_weight', label: 'HR weight', desc: 'Influence of heart-rate signal on decisions', v: 0.72, c: '#22D3EE', hint: 'Physio-first' },
+      { id: 'history_weight', label: 'History weight', desc: 'Weight of past-session outcomes', v: 0.34, c: '#60A5FA', hint: 'Present-focused' },
+      { id: 'exploration', label: 'Exploration ε', desc: 'Chance of trying non-optimal patterns to learn', v: 0.12, c: '#34D399', hint: 'Conservative' },
+    ],
+    flags: [
+      { id: 'auto_pacing', label: 'Auto-adaptive pacing', sub: 'Live pattern changes mid-session', on: true, exp: false },
+      { id: 'hrv_coherence', label: 'HRV coherence detection', sub: 'Requires wearable · 12% of users', on: true, exp: false },
+      { id: 'cross_session', label: 'Cross-session learning', sub: 'Personal model persists between sessions', on: true, exp: false },
+      { id: 'emotion_ambience', label: 'Emotion-aware ambience', sub: 'Soundscape reacts to mood signal', on: false, exp: true },
+      { id: 'llm_guidance', label: 'LLM-generated guidance', sub: 'Dynamic voice coaching lines', on: false, exp: true },
+    ],
+    preview: {
+      input: [{ k: 'stress', v: '0.72', c: '#F59E0B' }, { k: 'hr_baseline', v: '68 bpm', c: '#22D3EE' }, { k: 'mood', v: '"anxious"', c: '#60A5FA' }, { k: 'history_avg', v: '0.54', c: '#A78BFA' }, { k: 'time_of_day', v: '20:14', c: '#94A3B8' }],
+      pattern: [4, 7, 8], confidence: 0.87, fallback: '4·4·6',
+    },
+    rollout: { pct: 82, users: '34,821 / 42,410', prev: { v: '2.4.0', pct: 16 }, canary: { v: '2.5.0', pct: 2 } },
+    effectiveness: { a: genLine(30, 74, 8, 0.3), b: genLine(30, 12, 4, 0.05) },
+  }),
+  biometrics: () => ({
+    kpis: { hrReduction: -8.2, hrvImprovement: 14.6, recovery: '4:12', coherence: 72 },
+    hr: {
+      start: [76, 74, 78, 82, 80, 76, 74, 72, 74, 72, 70, 68, 66, 64],
+      end: [64, 63, 65, 68, 66, 62, 61, 60, 61, 58, 57, 56, 55, 54],
+      labels: ['Jul 09', 'Jul 13', 'Jul 17', 'Jul 21'],
+    },
+    segments: [
+      { seg: 'High stress · morning', pattern: '4·2·6', c: '#F59E0B', eff: 68 },
+      { seg: 'Anxious · evening', pattern: '4·7·8', c: '#A78BFA', eff: 84 },
+      { seg: 'Athletic · post-workout', pattern: '5·0·5', c: '#22D3EE', eff: 72 },
+      { seg: 'Insomnia · pre-sleep', pattern: '4·7·8', c: '#7C3AED', eff: 91 },
+      { seg: 'General · calm', pattern: '4·4·4', c: '#34D399', eff: 63 },
+    ],
+    heatmap: heatGrid(), heatSessions: 32140, heatPeak: 'Peak: Tue 8pm · 0.94',
+    arc: { milestones: [{ l: 'Start', v: 0.78 }, { l: '1 min', v: 0.62 }, { l: '3 min', v: 0.44 }, { l: '5 min', v: 0.28 }, { l: '8 min', v: 0.16 }] },
+    hrv: { pct: 72, users: 2140, rows: [{ l: 'High coherence', v: 46, c: '#34D399' }, { l: 'Moderate', v: 26, c: '#22D3EE' }, { l: 'Low', v: 18, c: '#F59E0B' }, { l: 'Non-coherent', v: 10, c: '#F87171' }] },
+  }),
+  experiments: () => ({
+    kpis: { live: 6, inTests: '42.1k', winning: 8, avgLift: '+9.4%' },
+    featured: {
+      id: 'exp_039', conf: 99, meta: '21 days · 20,180 users',
+      title: 'AI aggression 0.7 vs 0.5', desc: 'Higher adaptation aggression for users with stress > 0.6. Variant B shows significant calm-score lift with no retention cost.',
+      rec: 'Recommendation: promote to 100%',
+      a: { name: 'A · Control', calm: 62.4, conv: '8.2%', d7: '61%', users: '10,090' },
+      b: { name: 'B · Aggression 0.7', calm: 74.6, conv: '12.4%', d7: '66%', users: '10,090' },
+      chart: { a: genLine(14, 62, 4, 0.1), b: genLine(14, 66, 4, 0.6), lift: '+12.6%' },
+    },
+    rows: [
+      { id: 'exp_041', name: 'Onboarding: 1 breath before signup', days: 6, status: 'Running', variants: 2, users: '8,420', lift: '+3.1%', conf: 62 },
+      { id: 'exp_040', name: 'Evening push copy v3', days: 9, status: 'Running', variants: 3, users: '14,100', lift: '+6.8%', conf: 88 },
+      { id: 'exp_039', name: 'AI aggression 0.7 vs 0.5', days: 21, status: 'Winning', variants: 2, users: '20,180', lift: '+12.6%', conf: 99 },
+      { id: 'exp_038', name: 'Paywall after 5th session', days: 14, status: 'Winning', variants: 2, users: '11,300', lift: '+9.2%', conf: 96 },
+      { id: 'exp_037', name: 'Haptic intensity curve', days: 4, status: 'Paused', variants: 2, users: '3,900', lift: '−0.4%', conf: 22 },
+      { id: 'exp_036', name: 'Sleep story narrator B', days: 30, status: 'Complete', variants: 2, users: '18,240', lift: '+4.4%', conf: 94 },
+    ],
+  }),
+  notifications: () => ({
+    kpis: { sent: '184k', open: '42.6%', conv: '14.8%', unsub: '0.12%' },
+    audience: '~14,200', projOpen: '46%',
+    rules: [
+      { id: 1, name: 'Evening unwind', trigger: 'stress > 0.7 · 7-10pm', sent: '82,400', open: 48, on: true },
+      { id: 2, name: 'Sleep prep', trigger: 'pre-sleep window · no session', sent: '41,800', open: 52, on: true },
+      { id: 3, name: 'Morning intent', trigger: 'wake window · streak > 3', sent: '24,600', open: 38, on: true },
+      { id: 4, name: 'Streak protect', trigger: 'streak at risk · 8pm', sent: '12,100', open: 61, on: true },
+      { id: 5, name: 'Weekly insight', trigger: 'sunday 6pm', sent: '9,400', open: 44, on: true },
+      { id: 6, name: 'Program suggestion', trigger: 'AI match > 0.8', sent: '7,200', open: 42, on: true },
+      { id: 7, name: 'Comeback', trigger: 'inactive 7d', sent: '5,800', open: 18, on: false },
+      { id: 8, name: 'Premium teaser', trigger: 'free · 10+ sessions', sent: '4,100', open: 22, on: false },
+    ],
+  }),
+  revenue: () => ({
+    kpis: { mrr: '$142.4k', arpu: '$8.42', ltv: '$62.10', churn: '3.4%' },
+    mrr: {
+      months: [
+        { m: 'Feb', total: 98, nw: 12, exp: 4, ch: 5 }, { m: 'Mar', total: 108, nw: 14, exp: 5, ch: 4 },
+        { m: 'Apr', total: 116, nw: 13, exp: 6, ch: 5 }, { m: 'May', total: 124, nw: 15, exp: 6, ch: 4 },
+        { m: 'Jun', total: 133, nw: 16, exp: 7, ch: 4 }, { m: 'Jul', total: 142, nw: 17, exp: 8, ch: 3 },
+      ],
+    },
+    planMix: { total: '16.8k', rows: [{ l: 'Yearly', pct: 68, n: '11,420', c: '#8B5CF6' }, { l: 'Monthly', pct: 28, n: '4,700', c: '#22D3EE' }, { l: 'Trial', pct: 4, n: '680', c: '#34D399' }] },
+    funnel: [
+      { l: 'Paywall seen', v: 24800, c: '#7C3AED' }, { l: 'Plan viewed', v: 14200, c: '#8B5CF6' },
+      { l: 'Checkout started', v: 6400, c: '#22D3EE' }, { l: 'Payment entered', v: 4100, c: '#34D399' },
+      { l: 'Subscribed', v: 3650, c: '#60A5FA' },
+    ],
+    insight: 'Users seeing paywall after their 5th session convert at 21.4% vs 8.2% overall. Recommend delaying the paywall trigger.',
+    ltv: { labels: ['M0', 'M2', 'M4', 'M6', 'M8', 'M11'], cohorts: [
+      { name: 'Jan cohort', c: '#8B5CF6', data: genLine(12, 20, 4, 4.2) },
+      { name: 'Mar cohort', c: '#22D3EE', data: genLine(12, 18, 4, 3.6) },
+      { name: 'May cohort', c: '#34D399', data: genLine(12, 16, 3, 3.1) },
+    ] },
+  }),
+  health: () => ({
+    banner: { title: 'All systems operational', sub: '14 services · 4 regions · uptime 99.982% last 90 days', regions: [{ l: 'US-E', ok: true }, { l: 'US-W', ok: true }, { l: 'EU-C', ok: true }, { l: 'APAC', ok: false }] },
+    kpis: { p50: '82ms', errRate: '0.08%', audioFails: 14, ws: 4120 },
+    latency: { p50: genLine(24, 80, 10, 0.2), p95: genLine(24, 180, 25, 0.4), p99: genLine(24, 290, 40, 0.6) },
+    services: [
+      { name: 'API Gateway', ms: 82, up: '99.99%', st: 'ok' }, { name: 'Auth', ms: 24, up: '99.99%', st: 'ok' },
+      { name: 'Session DB', ms: 46, up: '99.98%', st: 'ok' }, { name: 'AI Inference', ms: 134, up: '99.95%', st: 'ok' },
+      { name: 'Audio CDN', ms: 210, up: '99.71%', st: 'warn' }, { name: 'Biometric Pipeline', ms: 68, up: '99.97%', st: 'ok' },
+      { name: 'Push Delivery', ms: 112, up: '99.92%', st: 'ok' }, { name: 'WebSocket Fleet', ms: 18, up: '99.99%', st: 'ok' },
+      { name: 'Analytics Ingest', ms: 95, up: '99.96%', st: 'ok' }, { name: 'Backup · APAC', ms: 0, up: '98.20%', st: 'down' },
+    ],
+    sensory: { pct: 99.8, rows: [{ l: 'Audio drift < 40ms', v: 99.6 }, { l: 'Haptic on-beat', v: 98.9 }, { l: 'Ambient loop OK', v: 99.9 }, { l: 'Spatial audio', v: 97.4 }] },
+    devices: [{ l: 'iOS 26', v: 96 }, { l: 'iOS 25', v: 94 }, { l: 'iOS 24', v: 88 }, { l: 'Android 15', v: 82 }, { l: 'Android 14', v: 76 }, { l: 'watchOS', v: 91 }],
+    incidents: [
+      { t: 'Audio CDN elevated latency', code: 'SND_303', sub: 'EU-C edge · mitigating', ago: '2h', sev: 'amber' },
+      { t: 'Backup replication delay', code: 'DB_412', sub: 'APAC · investigating', ago: '4h', sev: 'red' },
+      { t: 'Deployment · aura-2.4.1', code: 'DPL_204', sub: 'Rolled to 82% · healthy', ago: '8h', sev: 'green' },
+      { t: 'AI inference GPU scaled', code: 'AI_101', sub: '+2 nodes · autoscale', ago: '11h', sev: 'cyan' },
+      { t: 'Feature flag change', code: 'FLG_089', sub: 'emotion_ambience → off', ago: '13h', sev: 'violet' },
+    ],
+  }),
+  analytics: () => ({
+    kpis: { calmImprovement: '+18.4', conversion: '74.2%', depth: '6.4', effective: '82.6%' },
+    cohorts: [
+      { w: 'Jun 03', n: '1,240', v: [100, 74, 61, 52, 47, 44, 42, 41] },
+      { w: 'Jun 10', n: '1,380', v: [100, 76, 63, 55, 49, 46, 44, null] },
+      { w: 'Jun 17', n: '1,510', v: [100, 78, 66, 58, 52, 48, null, null] },
+      { w: 'Jun 24', n: '1,620', v: [100, 79, 68, 60, 54, null, null, null] },
+      { w: 'Jul 01', n: '1,790', v: [100, 81, 70, 62, null, null, null, null] },
+      { w: 'Jul 08', n: '1,940', v: [100, 83, 72, null, null, null, null, null] },
+      { w: 'Jul 15', n: '2,080', v: [100, 85, null, null, null, null, null, null] },
+    ],
+    funnel: [
+      { l: 'App open', v: 82000, c: '#7C3AED' }, { l: 'Home viewed', v: 68400, c: '#8B5CF6' },
+      { l: 'Session started', v: 54200, c: '#22D3EE' }, { l: 'Cycle 3 reached', v: 42100, c: '#34D399' },
+      { l: 'Completed', v: 38400, c: '#60A5FA' },
+    ],
+    dropoff: [
+      { l: 'Cycle 1', v: 4 }, { l: 'Cycle 2', v: 12, hot: true }, { l: 'Cycle 3', v: 8 },
+      { l: 'Cycle 4', v: 5 }, { l: 'Cycle 5', v: 3 }, { l: 'Cycle 6+', v: 2 },
+    ],
+    dropInsight: 'Cycle 2 drop-off is elevated. Users of the 4·7·8 pattern with stress > 0.6 leave at 22%. Consider a shorter hold for first-time high-stress users.',
+    calm: { a: genLine(20, 64, 6, 0.5), b: genLine(20, 58, 5, 0.35) },
+    scatter: Array.from({ length: 42 }, (_, i) => ({ x: 40 + ((i * 149) % 660), y: 200 - ((i * 97) % 170) })),
+    correlation: 0.68,
+  }),
+}
+
+admin.get('/scc/:module', async (c) => {
+  const mod = c.req.param('module')
+  const fn = SCC_DATA[mod]
+  if (!fn) return c.json({ error: 'Unknown module' }, 404)
+  return c.json({ module: mod, mock: true, data: fn() })
+})
+
+// Config-write stubs — validated + audit-logged; persistence wired to KV/D1 later.
+admin.put('/scc/ai', async (c) => {
+  const me = c.get('user')
+  const b = await c.req.json().catch(() => ({}))
+  const payload: Record<string, unknown> = {}
+  if (b.sliders && typeof b.sliders === 'object') payload.sliders = b.sliders
+  if (b.flags && typeof b.flags === 'object') payload.flags = b.flags
+  if (!Object.keys(payload).length) return c.json({ error: 'Nothing to update' }, 400)
+  await logAudit(c.env.DB, me.sub, 'ai_config_update', 'ai_model', 0, payload, clientIp(c))
+  return c.json({ ok: true, persisted: false, note: 'Config stub — wire to model service later' })
+})
+
+admin.put('/scc/notifications/:id', async (c) => {
+  const me = c.get('user')
+  const id = parseInt(c.req.param('id'), 10)
+  const b = await c.req.json().catch(() => ({}))
+  if (typeof b.enabled !== 'boolean') return c.json({ error: 'enabled boolean required' }, 400)
+  await logAudit(c.env.DB, me.sub, 'notification_rule_toggle', 'notification_rule', id, { enabled: b.enabled }, clientIp(c))
+  return c.json({ ok: true, id, enabled: b.enabled, persisted: false })
+})
+
 export default admin
