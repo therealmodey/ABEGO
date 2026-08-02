@@ -167,6 +167,33 @@ Legacy hashes still work: `#/dashboard`→overview, `#/content`→programs, `#/a
 ### Verified (2026-08-01)
 jsdom E2E: login → all 12 views render (nav=11, live rows=9, AI sliders=5, heatmap rows=7, experiment rows=6, rules=8, services=10, incidents=5), program-toggle + notification-toggle round-trips, user search/select/detail, audit rows, legacy aliases, theme toggle — **ALL PASS**, zero console errors. All 4 prior regression suites (session flow, state-loss recovery, programs filter, theme engine) PASS.
 
+## Admin Functionality Pass — Every Control Wired (2026-08-02)
+Every interactive element in the Super Command Centre now performs a real action, persists to D1, and (where applicable) changes the user-facing app. Zero "design stub" toasts remain.
+
+**New persistence layer (migration `0003_admin_controls.sql`)**
+- `app_config` — versioned AI engine config (`ai_config` key: 5 sliders + 5 flags)
+- `notification_rules` — 8 behavioural rules (enable/disable, create)
+- `experiments` — 6 experiments (pause/resume, promote winner, create)
+- `admin_notes` — per-user admin notes
+
+**Admin → user-app effects (shared `src/lib/aiconfig.ts`)**
+- `POST /api/app/moods` suggestions honour published AI config: `auto_pacing` gates evening pacing, `stress_sensitivity ≥ 0.7` extends anxious exhale, `cross_session` lengthens sessions when calm trends low, `exploration` deterministically trials variants, `llm_guidance` appends guidance copy
+- `GET /api/app/config` exposes flags to the client; `emotion_ambience` adds a glow to suggestion cards
+- Programs toggles (active/premium) already governed real availability
+
+**Wired controls per view**
+- Topbar: range seg (24h/7d/30d/90d) refetches every module with `?range=`; bell opens a live activity popover; global search jumps to Users
+- Overview: Line/Area chart toggle
+- Mission Control: Globe/List panel toggle, All/Anxious/Flagged row filter, Filter = sort by stress
+- AI Control: sliders + flags + Publish/Reset persist via `PUT /admin/scc/ai` (audit-logged, cache-invalidated); 30d/90d/YTD refetch
+- Analytics: Weekly/Monthly cohorts, Avg/P50/P90 calm series, Export downloads real CSV
+- Experiments: Pause/Resume + Promote winner persist; New experiment modal `POST`s; All/Running/Complete filter
+- Notifications: rule toggles persist; Activate rule creates a real rule; Test refreshes the iOS preview; Manage templates modal
+- Health: incident Timeline modal
+- Users: Invite (temp password via `POST /users/invite`), Impersonate (real JWT swap — return to `/admin` to restore), Add note, Full profile + Replay modals with real telemetry (`GET /users/:id`), 3-filters popover (status/role); detail panel shows real sessions/calm/LTV/timeline
+
+**Validation**: new jsdom suite `admin-interactions.js` (13 interaction round-trips incl. persist-verify via API) + 12-view suite + 4 regression suites — ALL PASS.
+
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
 - Email notifications (receipts, dunning) and password reset

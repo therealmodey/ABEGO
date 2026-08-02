@@ -1,6 +1,6 @@
 /* AURA Admin — Super Command Centre v2 (full rebuild per design handoff3) */
 (function () {
-  const { api, AuraState, icon, toast, confirmModal, Theme } = window.Aura;
+  const { api, AuraState, icon, toast, confirmModal, Theme, openModal } = window.Aura;
   const root = document.getElementById('app');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -10,7 +10,13 @@
     const token = localStorage.getItem('aura_token');
     if (!token) { location.href = '/#/login'; return false; }
     try {
-      const { data } = await api.get('/auth/me');
+      let { data } = await api.get('/auth/me');
+      if (data.user.role !== 'admin' && localStorage.getItem('aura_admin_return')) {
+        // returning from an impersonation session — restore the admin token
+        localStorage.setItem('aura_token', localStorage.getItem('aura_admin_return'));
+        localStorage.removeItem('aura_admin_return');
+        ({ data } = await api.get('/auth/me'));
+      }
       if (data.user.role !== 'admin') {
         toast('Admin access required', 'warn');
         setTimeout(() => (location.href = '/'), 800);
@@ -133,12 +139,21 @@
 
   /* ---- SCC mock module fetcher (schema: GET /admin/scc/:module) ---- */
   const sccCache = {};
-  async function sccData(mod) {
-    if (sccCache[mod]) return sccCache[mod];
-    const { data } = await api.get(`/admin/scc/${mod}`);
-    sccCache[mod] = data.data;
+  let sccRange = '7d'; // topbar-selected data range, threaded into module fetches
+  async function sccData(mod, range) {
+    const r = range || sccRange;
+    const key = `${mod}:${r}`;
+    if (sccCache[key]) return sccCache[key];
+    const { data } = await api.get(`/admin/scc/${mod}?range=${encodeURIComponent(r)}`);
+    sccCache[key] = data.data;
     return data.data;
   }
+
+  // Admin input modal — wraps openModal with the shared veil + sheet chrome
+  const sccModal = (html, maxW) => openModal('modal-veil modal-veil--center', `<div class="sheet sheet--center scc-modal" style="max-width:${maxW || 420}px">${html}</div>`);
+
+  // Per-view UI control state (segmented toggles / filters — survives re-renders)
+  const uiState = { ovMode: 1, liveMode: 0, liveFilter: 0, liveSort: false, aiRange: '30d', anCohort: 0, anCalm: 0, expFilter: 0, uStatus: 0, uRole: 0 };
 
   /* ================= SVG chart helpers (per admin_kit handoff) ================= */
   let gid = 0;
@@ -502,7 +517,7 @@
                 ${aic('search', 15)}<input id="scc-global-search" placeholder="Search users, sessions, programs…"/>
                 <span class="scc-search-keys"><span class="scc-key">⌘</span><span class="scc-key">K</span></span>
               </div>
-              ${segControl(['24h', '7d', '30d', '90d'], 1)}
+              ${segControl(['24h', '7d', '30d', '90d'], Math.max(0, ['24h','7d','30d','90d'].indexOf(sccRange)))}
               <span class="scc-env">${dot(GOOD, true)} Prod</span>
               <button class="scc-bell" id="scc-bell" title="Notifications">${aic('bell', 15)}<i></i></button>
               <button class="scc-btn" id="scc-theme" title="Toggle theme">${icon(Theme.mode === 'light' ? 'moon' : 'spark', 15)}<span>${Theme.mode === 'light' ? 'Dark' : 'Light'}</span></button>
@@ -533,12 +548,31 @@
       }
     };
     const bell = document.getElementById('scc-bell');
-    if (bell) bell.onclick = () => toast('3 unread alerts — see Mission Control anomalies', 'ok');
-    // topbar range segmented (visual data-range selector; per-range data wired later)
+    if (bell) bell.onclick = async (ev) => {
+      ev.stopPropagation();
+      const exist = document.getElementById('scc-bell-pop');
+      if (exist) { exist.remove(); return; }
+      let logs = [];
+      try { logs = ((await api.get('/admin/activity-logs?limit=6')).data.logs || []).slice(0, 6); } catch (e) {}
+      const pop = document.createElement('div');
+      pop.id = 'scc-bell-pop'; pop.className = 'scc-pop';
+      pop.innerHTML = `<div class="scc-pop-head">Recent alerts</div>` +
+        (logs.length ? logs.map(a => `<div class="scc-pop-row">${dot(a.action && a.action.includes('fail') ? BAD : ACCENT_C)}<span><strong>${esc(a.email || 'system')}</strong> ${esc(a.action)}</span><em>${fmtDate(a.created_at)}</em></div>`).join('')
+          : '<p class="scc-empty" style="padding:12px">No recent activity</p>');
+      bell.parentElement.style.position = 'relative';
+      bell.parentElement.appendChild(pop);
+      const away = (e2) => { if (!pop.contains(e2.target)) { pop.remove(); document.removeEventListener('click', away); } };
+      setTimeout(() => document.addEventListener('click', away), 0);
+    };
+    // topbar range: switches the data window for every range-aware module
     document.querySelectorAll('.scc-top-right .scc-seg button').forEach(b => {
       b.onclick = () => {
         b.parentElement.querySelectorAll('button').forEach(x => x.classList.remove('on'));
         b.classList.add('on');
+        sccRange = b.textContent.trim();
+        Object.keys(sccCache).forEach(k => delete sccCache[k]);
+        const v = currentView();
+        if (views[v]) views[v]();
       };
     });
   }
@@ -583,8 +617,8 @@
       <div class="scc-grid-2-1">
         <div class="scc-card scc-card--glow">
           ${cardHead('Session volume × calm score', 'Sessions (violet) vs avg calm (cyan)',
-            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_V)} Sessions</span><span>${dot(ACCENT_C)} Avg calm</span></div>${segControl(['Line', 'Area'], 1)}</div>`)}
-          ${sessSeries.length > 1 ? lineChart(sessSeries, calmSeries.some(v => v > 0) ? calmSeries : null, 560, 180, dayLabels) : '<p class="scc-empty">Not enough session data yet</p>'}
+            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_V)} Sessions</span><span>${dot(ACCENT_C)} Avg calm</span></div>${segControl(['Line', 'Area'], uiState.ovMode, 'ov-mode-seg')}</div>`)}
+          ${sessSeries.length > 1 ? lineChartM([{ data: sessSeries, color: ACCENT_V, area: uiState.ovMode === 1 }].concat(calmSeries.some(v => v > 0) ? [{ data: calmSeries, color: ACCENT_C }] : []), 560, 180, dayLabels) : '<p class="scc-empty">Not enough session data yet</p>'}
         </div>
         <div class="scc-stack">
           <div class="scc-card">
@@ -636,6 +670,7 @@
         ${activityRows(d.recentActivity || [])}
       </div>
     `);
+    document.querySelectorAll('.ov-mode-seg button').forEach((b, i) => b.onclick = () => { uiState.ovMode = i; views.overview(); });
   };
 
   /* ============ 02 · MISSION CONTROL (live) ============ */
@@ -652,7 +687,11 @@
     </div>`;
 
     const cols = '1.4fr 1fr 90px 1fr 90px 90px 90px 60px';
-    const rows = m.sessions.map(s => {
+    let sess = m.sessions.slice();
+    if (uiState.liveFilter === 1) sess = sess.filter(s => s.stress >= 0.6);
+    if (uiState.liveFilter === 2) sess = sess.filter(s => s.hot);
+    if (uiState.liveSort) sess = sess.slice().sort((a, b) => b.stress - a.stress);
+    const rows = sess.map(s => {
       const pc = PHASE_C[s.phase] || SLATE;
       const stressC = s.stress > 0.7 ? WARN : s.stress > 0.5 ? ACCENT_V : GOOD;
       return `<div class="scc-trow" style="grid-template-columns:${cols};${s.hot ? 'background:rgba(245,158,11,0.06)' : ''}">
@@ -679,8 +718,10 @@
       <div class="scc-grid-171">
         <div class="scc-card scc-card--glow">
           ${cardHead('Global session flow', 'Live sessions by region · last hour',
-            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_C)} Hotspot</span><span>${dot(ACCENT_V)} Session</span></div>${segControl(['Globe', 'List'], 0)}</div>`)}
-          ${globeStub(Array.from({ length: 16 }, (_, i) => ({ x: 60 + ((i * 137) % 580), y: 40 + ((i * 89) % 160), hot: i % 5 === 0 })), m.stats.live, 190)}
+            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_C)} Hotspot</span><span>${dot(ACCENT_V)} Session</span></div>${segControl(['Globe', 'List'], uiState.liveMode, 'live-mode-seg')}</div>`)}
+          ${uiState.liveMode === 0
+            ? globeStub(Array.from({ length: 16 }, (_, i) => ({ x: 60 + ((i * 137) % 580), y: 40 + ((i * 89) % 160), hot: i % 5 === 0 })), m.stats.live, 190)
+            : (() => { const byR = {}; m.sessions.forEach(s => { byR[s.region] = (byR[s.region] || 0) + 1; }); const rs = Object.entries(byR).sort((a, b) => b[1] - a[1]); const mx = Math.max(1, ...rs.map(r => r[1])); return `<div style="min-height:190px;display:flex;flex-direction:column;justify-content:center;gap:4px">${rs.map(([r, n2]) => meter(r, n2, mx, String(n2))).join('')}</div>`; })()}
           <div style="margin-top:10px">${barChart(m.timeline, 700, 80, 8, ['-55', '', '', '-40', '', '', '-25', '', '', '-10', '', 'now'])}</div>
         </div>
         <div class="scc-stack">
@@ -706,21 +747,25 @@
       </div>
 
       <div class="scc-card">
-        ${cardHead('Live sessions', `Showing ${m.sessions.length} of ${m.stats.live}`,
-          `<div style="display:flex;align-items:center;gap:10px"><span class="scc-btn">${aic('filter', 13)}<span>Filter</span></span>${segControl(['All', 'Anxious', 'Flagged'], 0)}</div>`)}
+        ${cardHead('Live sessions', `Showing ${sess.length} of ${m.stats.live}`,
+          `<div style="display:flex;align-items:center;gap:10px"><span class="scc-btn ${uiState.liveSort ? 'scc-btn--violet' : ''}" id="live-sort" title="Sort by stress">${aic('filter', 13)}<span>Filter</span></span>${segControl(['All', 'Anxious', 'Flagged'], uiState.liveFilter, 'live-filter-seg')}</div>`)}
         <div class="scc-thead" style="grid-template-columns:${cols}">
           <span>User</span><span>Region</span><span>Pattern</span><span>Phase</span><span>Stress</span><span>Calm</span><span>Duration</span><span></span>
         </div>
-        ${rows}
+        ${rows || '<p class="scc-empty">No live sessions match this filter</p>'}
       </div>
     `);
+    document.querySelectorAll('.live-mode-seg button').forEach((b, i) => b.onclick = () => { uiState.liveMode = i; views.live(); });
+    document.querySelectorAll('.live-filter-seg button').forEach((b, i) => b.onclick = () => { uiState.liveFilter = i; views.live(); });
+    const ls = document.getElementById('live-sort');
+    if (ls) ls.onclick = () => { uiState.liveSort = !uiState.liveSort; views.live(); };
   };
 
   /* ============ 03 · AI CONTROL ============ */
   views.ai = async function () {
     layout('ai', spinner);
     let m;
-    try { m = await sccData('ai'); } catch (e) { return layout('ai', errBox(e)); }
+    try { m = await sccData('ai', uiState.aiRange); } catch (e) { return layout('ai', errBox(e)); }
     const pv = m.preview;
     const digitC = [PHASE_C.inhale, PHASE_C.hold, PHASE_C.exhale];
 
@@ -778,12 +823,12 @@
 
       <div class="scc-card scc-card--glow">
         ${cardHead('Model effectiveness × exploration', 'Last 30 days',
-          `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(GOOD)} Effectiveness</span><span>${dot(ACCENT_V)} Exploration</span></div>${segControl(['30d', '90d', 'YTD'], 0)}</div>`)}
+          `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(GOOD)} Effectiveness</span><span>${dot(ACCENT_V)} Exploration</span></div>${segControl(['30d', '90d', 'YTD'], ['30d','90d','ytd'].indexOf(uiState.aiRange), 'ai-range-seg')}</div>`)}
         ${lineChartM([{ data: m.effectiveness.a, color: GOOD, area: true }, { data: m.effectiveness.b, color: ACCENT_V }], 700, 170, ['30d ago', '15d ago', 'today'])}
       </div>
     `);
 
-    // slider live-update + config PUT stubs
+    // slider live-update + persisted config PUTs
     const state = { sliders: {}, flags: {} };
     document.querySelectorAll('#ai-sliders input[type="range"]').forEach(inp => {
       inp.oninput = () => {
@@ -795,7 +840,7 @@
     document.querySelectorAll('.scc-flag-row input[data-tg]').forEach(inp => {
       inp.onchange = async () => {
         state.flags[inp.dataset.tg] = !!inp.checked;
-        try { await api.put('/admin/scc/ai', { flags: { [inp.dataset.tg]: !!inp.checked } }); toast('Flag saved (stub — audit-logged)', 'ok'); }
+        try { await api.put('/admin/scc/ai', { flags: { [inp.dataset.tg]: !!inp.checked } }); Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; }); toast('Flag saved — live for all users', 'ok'); }
         catch (e) { inp.checked = !inp.checked; toast('Save failed', 'warn'); }
       };
     });
@@ -803,11 +848,28 @@
     if (pub) pub.onclick = async () => {
       const ok = await confirmModal('Publish tuning?', 'New adaptation weights will roll out to all users on the current model version.', 'Publish', false);
       if (!ok) return;
-      try { await api.put('/admin/scc/ai', { sliders: state.sliders, flags: state.flags }); toast('Published (stub — audit-logged)', 'ok'); }
-      catch (e) { toast('Publish failed', 'warn'); }
+      try {
+        await api.put('/admin/scc/ai', { sliders: state.sliders, flags: state.flags });
+        Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; });
+        toast('Published — new weights are live', 'ok');
+        views.ai();
+      } catch (e) { toast('Publish failed', 'warn'); }
     };
     const rst = document.getElementById('ai-reset');
-    if (rst) rst.onclick = () => { delete sccCache.ai; views.ai(); };
+    if (rst) rst.onclick = async () => {
+      const ok = await confirmModal('Reset tuning?', 'All sliders and flags return to their default values for every user.', 'Reset', false);
+      if (!ok) return;
+      try {
+        await api.put('/admin/scc/ai', {
+          sliders: { stress_sensitivity: 0.68, adaptation_speed: 0.45, hr_weight: 0.72, history_weight: 0.34, exploration: 0.12 },
+          flags: { auto_pacing: true, hrv_coherence: true, cross_session: true, emotion_ambience: false, llm_guidance: false },
+        });
+        Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; });
+        toast('Defaults restored', 'ok');
+        views.ai();
+      } catch (e) { toast('Reset failed', 'warn'); }
+    };
+    document.querySelectorAll('.ai-range-seg button').forEach((b, i) => b.onclick = () => { uiState.aiRange = ['30d', '90d', 'ytd'][i]; views.ai(); });
   };
 
   /* ============ 04 · ADVANCED ANALYTICS ============ */
@@ -830,8 +892,8 @@
 
       <div class="scc-card scc-card--glow">
         ${cardHead('Retention by weekly cohort', 'Percent of cohort returning each week',
-          `<div style="display:flex;align-items:center;gap:10px">${segControl(['Weekly', 'Monthly'], 0)}<span class="scc-btn">Export</span></div>`)}
-        ${cohortGrid(m.cohorts)}
+          `<div style="display:flex;align-items:center;gap:10px">${segControl(['Weekly', 'Monthly'], uiState.anCohort, 'an-cohort-seg')}<span class="scc-btn" id="an-export">Export</span></div>`)}
+        ${cohortGrid(uiState.anCohort === 0 ? m.cohorts : (m.cohortsMonthly || m.cohorts))}
       </div>
 
       <div class="scc-grid-113">
@@ -841,8 +903,8 @@
         </div>
         <div class="scc-card">
           ${cardHead('Calm improvement over time', 'Plus (violet) vs Free (cyan)',
-            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_V)} Plus</span><span>${dot(ACCENT_C)} Free</span></div>${segControl(['Avg', 'P50', 'P90'], 0)}</div>`)}
-          ${lineChartM([{ data: m.calm.a, color: ACCENT_V, area: true }, { data: m.calm.b, color: ACCENT_C }], 620, 190, ['W1', 'W10', 'W20'])}
+            `<div style="display:flex;align-items:center;gap:10px"><div class="scc-legend"><span>${dot(ACCENT_V)} Plus</span><span>${dot(ACCENT_C)} Free</span></div>${segControl(['Avg', 'P50', 'P90'], uiState.anCalm, 'an-calm-seg')}</div>`)}
+          ${(() => { const cs = [m.calm, m.calmP50 || m.calm, m.calmP90 || m.calm][uiState.anCalm]; return lineChartM([{ data: cs.a, color: ACCENT_V, area: true }, { data: cs.b, color: ACCENT_C }], 620, 190, ['W1', 'W10', 'W20']); })()}
           ${calmReal.some(v => v > 0) ? `<p class="scc-card-sub" style="margin-top:8px">Live D1 avg calm (last ${calmReal.length}d): <b class="scc-mono">${Math.round(calmReal.reduce((a, b) => a + b, 0) / Math.max(1, calmReal.filter(Boolean).length))}</b></p>` : ''}
         </div>
       </div>
@@ -865,6 +927,19 @@
         </div>
       </div>
     `);
+    document.querySelectorAll('.an-cohort-seg button').forEach((b, i) => b.onclick = () => { uiState.anCohort = i; views.analytics(); });
+    document.querySelectorAll('.an-calm-seg button').forEach((b, i) => b.onclick = () => { uiState.anCalm = i; views.analytics(); });
+    const ex = document.getElementById('an-export');
+    if (ex) ex.onclick = () => {
+      const head = 'day,sessions,avg_calm';
+      const lines = byDay.map(x => `${x.day},${x.n ?? x.count ?? 0},${x.avg_calm ?? ''}`);
+      const csv = [head].concat(lines.length ? lines : ['no data,,']).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = `aura-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(a.href);
+      toast('Analytics exported to CSV', 'ok');
+    };
   };
 
   /* ============ 05 · BIOMETRICS ============ */
@@ -1038,7 +1113,10 @@
     const stC = { Running: GOOD, Winning: ACCENT_C, Paused: WARN, Complete: ACCENT_V };
     const cols = '90px 1.5fr 100px 80px 100px 80px 120px 40px';
 
-    const rows = m.rows.map(r => {
+    const expList = uiState.expFilter === 0 ? m.rows
+      : uiState.expFilter === 1 ? m.rows.filter(r => r.status === 'Running' || r.status === 'Winning' || r.status === 'Paused')
+      : m.rows.filter(r => r.status === 'Complete');
+    const rows = expList.map(r => {
       const liftC = r.lift.startsWith('−') || r.lift.startsWith('-') ? BAD : parseFloat(r.lift) > 5 ? GOOD : 'var(--adm-text-2)';
       return `<div class="scc-trow" style="grid-template-columns:${cols}">
         <div class="scc-mono scc-cell-3">${esc(r.id)}</div>
@@ -1063,12 +1141,12 @@
       <div class="scc-card scc-card--glow">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <div>
-            <div style="display:flex;gap:8px;margin-bottom:8px">${tag(`${f.id} · Winning`, ACCENT_C)}${tag(`${f.conf}% confidence`, GOOD)}<span class="scc-card-sub" style="align-self:center">${esc(f.meta)}</span></div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">${tag(`${f.id} · ${f.status || 'Winning'}`, f.status === 'Paused' ? WARN : ACCENT_C)}${tag(`${f.conf}% confidence`, GOOD)}<span class="scc-card-sub" style="align-self:center">${esc(f.meta)}</span></div>
             <div class="scc-card-title" style="font-size:16px">${esc(f.title)}</div>
             <div class="scc-card-sub" style="max-width:520px;margin-top:4px">${esc(f.desc)} <b style="color:${GOOD}">${esc(f.rec)}</b></div>
           </div>
           <div style="display:flex;gap:8px">
-            <button class="scc-btn" id="exp-pause">${aic('pause', 13)}<span>Pause</span></button>
+            <button class="scc-btn" id="exp-pause">${aic('pause', 13)}<span>${f.status === 'Paused' ? 'Resume' : 'Pause'}</span></button>
             <button class="scc-btn" id="exp-promote" style="background:linear-gradient(90deg,${GOOD},#10B981);color:#052e22;border:none;font-weight:700">Promote winner</button>
           </div>
         </div>
@@ -1096,8 +1174,8 @@
       </div>
 
       <div class="scc-card">
-        ${cardHead('All experiments', `${m.rows.length} experiments`,
-          `<div style="display:flex;align-items:center;gap:10px">${segControl(['All', 'Running', 'Complete'], 0)}<button class="scc-btn" id="exp-new" style="background:linear-gradient(90deg,${ACCENT_V},${ACCENT_C});color:#fff;border:none">${aic('plus', 13)}<span>New experiment</span></button></div>`)}
+        ${cardHead('All experiments', `${expList.length} experiments`,
+          `<div style="display:flex;align-items:center;gap:10px">${segControl(['All', 'Running', 'Complete'], uiState.expFilter, 'exp-filter-seg')}<button class="scc-btn" id="exp-new" style="background:linear-gradient(90deg,${ACCENT_V},${ACCENT_C});color:#fff;border:none">${aic('plus', 13)}<span>New experiment</span></button></div>`)}
         <div class="scc-thead" style="grid-template-columns:${cols}">
           <span>ID</span><span>Experiment</span><span>Status</span><span>Variants</span><span>Users</span><span>Lift</span><span>Confidence</span><span></span>
         </div>
@@ -1105,15 +1183,41 @@
       </div>
     `);
 
+    const expRefresh = () => { Object.keys(sccCache).forEach(k => { if (k.startsWith('experiments:')) delete sccCache[k]; }); views.experiments(); };
     const promote = document.getElementById('exp-promote');
     if (promote) promote.onclick = async () => {
-      const ok = await confirmModal('Promote winner?', `Variant B of ${f.id} will roll out to 100% of users. (Experiment pipeline stub — wired later.)`, 'Promote', false);
-      if (ok) toast('Promotion queued (stub)', 'ok');
+      const ok = await confirmModal('Promote winner?', `Variant B of ${f.id} will roll out to 100% of users.`, 'Promote', false);
+      if (!ok) return;
+      try { await api.put(`/admin/scc/experiments/${f.id}`, { status: 'Complete', winner: 'B' }); toast(`${f.id} promoted — variant B rolled out`, 'ok'); expRefresh(); }
+      catch (e) { toast('Promote failed', 'warn'); }
     };
     const pause = document.getElementById('exp-pause');
-    if (pause) pause.onclick = () => toast('Experiment paused (stub)', 'ok');
+    if (pause) pause.onclick = async () => {
+      const next = f.status === 'Paused' ? 'Winning' : 'Paused';
+      try { await api.put(`/admin/scc/experiments/${f.id}`, { status: next }); toast(`${f.id} ${next === 'Paused' ? 'paused' : 'resumed'}`, 'ok'); expRefresh(); }
+      catch (e) { toast('Update failed', 'warn'); }
+    };
     const enew = document.getElementById('exp-new');
-    if (enew) enew.onclick = () => toast('Experiment builder — coming with pipeline integration', 'ok');
+    if (enew) enew.onclick = () => {
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">New experiment</h3>
+        <label class="scc-modal-lbl">Name</label>
+        <input class="scc-modal-input" id="nx-name" placeholder="e.g. Exhale chime volume" maxlength="80"/>
+        <label class="scc-modal-lbl">Variants</label>
+        <input class="scc-modal-input" id="nx-var" value="A / B" maxlength="20"/>
+        <div class="scc-modal-btns"><button class="btn-ghost" data-x>Cancel</button><button class="btn-primary" data-ok>Create</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+      modal.veil.querySelector('[data-ok]').onclick = async () => {
+        const name = modal.veil.querySelector('#nx-name').value.trim();
+        const variants = modal.veil.querySelector('#nx-var').value.trim() || 'A / B';
+        if (!name) { toast('Name required', 'warn'); return; }
+        try {
+          const { data } = await api.post('/admin/scc/experiments', { name, variants });
+          modal.close(); toast(`${data.id || 'Experiment'} created — now recruiting`, 'ok'); expRefresh();
+        } catch (e) { toast(e.response?.data?.error || 'Create failed', 'warn'); }
+      };
+    };
+    document.querySelectorAll('.exp-filter-seg button').forEach((b, i) => b.onclick = () => { uiState.expFilter = i; views.experiments(); });
   };
 
   /* ============ 08 · NOTIFICATION ENGINE ============ */
@@ -1183,7 +1287,7 @@
       </div>
 
       <div class="scc-card">
-        ${cardHead('Active rules', `${m.rules.length} rules · ${m.rules.filter(r => r.on).length} automated`, `<span class="scc-btn">Manage templates</span>`)}
+        ${cardHead('Active rules', `${m.rules.length} rules · ${m.rules.filter(r => r.on).length} automated`, `<span class="scc-btn" id="nr-templates">Manage templates</span>`)}
         <div class="scc-thead" style="grid-template-columns:${cols}">
           <span>Rule</span><span>Trigger</span><span>Sent · 7d</span><span>Open rate</span><span>Enabled</span><span></span>
         </div>
@@ -1191,22 +1295,48 @@
       </div>
     `);
 
+    const nrRefresh = () => { Object.keys(sccCache).forEach(k => { if (k.startsWith('notifications:')) delete sccCache[k]; }); views.notifications(); };
     document.querySelectorAll('input[data-tg^="rule-"]').forEach(inp => {
       inp.onchange = async () => {
         const id = inp.dataset.tg.replace('rule-', '');
         try {
           await api.put(`/admin/scc/notifications/${id}`, { enabled: !!inp.checked });
-          toast('Rule ' + (inp.checked ? 'enabled' : 'disabled') + ' (stub — audit-logged)', 'ok');
+          Object.keys(sccCache).forEach(k => { if (k.startsWith('notifications:')) delete sccCache[k]; });
+          toast('Rule ' + (inp.checked ? 'enabled — sending resumes' : 'disabled — sending stopped'), 'ok');
         } catch (e) { inp.checked = !inp.checked; toast('Save failed', 'warn'); }
       };
     });
     const act = document.getElementById('nr-activate');
     if (act) act.onclick = async () => {
-      const ok = await confirmModal('Activate rule?', 'Evening unwind will start sending to ~14,200 users tonight.', 'Activate', false);
-      if (ok) toast('Rule activated (stub)', 'ok');
+      const ok = await confirmModal('Activate rule?', `Evening unwind will start sending to ~${m.audience} users tonight.`, 'Activate', false);
+      if (!ok) return;
+      try {
+        await api.post('/admin/scc/notifications', {
+          name: 'Evening unwind (builder)',
+          trigger: 'stress > 0.7 · 7-10pm',
+          body: 'Your evening looks tense. 5 minutes of 4-7-8 usually brings you back down.',
+          enabled: true,
+        });
+        toast('Rule activated — now live in Active rules', 'ok'); nrRefresh();
+      } catch (e) { toast(e.response?.data?.error || 'Activation failed', 'warn'); }
     };
     const tst = document.getElementById('nr-test');
-    if (tst) tst.onclick = () => toast('Test notification sent to your device (stub)', 'ok');
+    if (tst) tst.onclick = () => {
+      const card = document.querySelector('.scc-ios-card');
+      const dateEl = document.querySelector('.scc-ios-date');
+      if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + ' · ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+      if (card) { card.style.animation = 'none'; void card.offsetWidth; card.style.animation = 'auraSlideUp 400ms cubic-bezier(0.4,0,0.2,1)'; }
+      toast('Test render delivered to preview', 'ok');
+    };
+    const tpl = document.getElementById('nr-templates');
+    if (tpl) tpl.onclick = () => {
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">Notification templates</h3>
+        <div class="scc-modal-list">${m.rules.map(r => `
+          <div class="scc-pop-row" style="padding:9px 2px">${dot(r.on ? GOOD : SLATE)}<span style="flex:1;min-width:0"><strong>${esc(r.name)}</strong><br/><small style="color:var(--adm-text-2)">${esc(r.body || r.trigger)}</small></span><em class="scc-mono">${r.open}%</em></div>`).join('')}</div>
+        <div class="scc-modal-btns"><button class="btn-primary" data-x>Done</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+    };
   };
 
   /* ============ 09 · REVENUE ============ */
@@ -1367,7 +1497,14 @@
       </div>
     `);
     const tl = document.getElementById('inc-timeline');
-    if (tl) tl.onclick = () => toast('Incident timeline is a design stub — full pager integration pending', 'info');
+    if (tl) tl.onclick = () => {
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">Incident timeline · last 24h</h3>
+        <div class="scc-modal-list">${m.incidents.map(e => `
+          <div class="scc-pop-row" style="padding:9px 2px">${dot(incColor[e.sev] || SLATE)}<span style="flex:1;min-width:0"><strong>${esc(e.t)}</strong><br/><small style="color:var(--adm-text-2)">${esc(e.sub)}</small></span><em class="scc-mono">${esc(e.ago)} ago</em></div>`).join('')}</div>
+        <div class="scc-modal-btns"><button class="btn-primary" data-x>Close</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+    };
   };
 
   /* ============ 11 · USERS ============ */
@@ -1390,8 +1527,15 @@
     const TIERS = ['All', 'Plus', 'Free', 'Trial'];
     const tierOf = (u) => u.plan === 'premium' || u.plan === 'pro' ? 'Plus' : u.plan === 'trial' ? 'Trial' : 'Free';
     const tierColor = { Plus: ACCENT_V, Free: SLATE, Trial: GOOD };
-    const list = usersState.tier === 0 ? d.users : d.users.filter(u => tierOf(u) === TIERS[usersState.tier]);
+    let list = usersState.tier === 0 ? d.users : d.users.filter(u => tierOf(u) === TIERS[usersState.tier]);
+    if (uiState.uStatus === 1) list = list.filter(u => u.status === 'active');
+    if (uiState.uStatus === 2) list = list.filter(u => u.status === 'suspended');
+    if (uiState.uRole === 1) list = list.filter(u => u.role === 'admin');
+    if (uiState.uRole === 2) list = list.filter(u => u.role !== 'admin');
     if (usersState.sel == null || !list.some(u => u.id === usersState.sel)) usersState.sel = list[0]?.id ?? null;
+    // real per-user telemetry for the detail panel (falls back to design mock when sparse)
+    let real = null;
+    if (usersState.sel != null) { try { real = (await api.get(`/admin/users/${usersState.sel}`)).data; } catch (e) {} }
     const plusCount = (an.plans || []).filter(p => p.plan === 'premium' || p.plan === 'pro').reduce((a, p) => a + p.n, 0);
 
     // deterministic mock enrich (streak / calm / last-seen / LTV) — real telemetry pending
@@ -1430,7 +1574,14 @@
       if (!selU) return `<div class="scc-card"><p class="scc-empty">Select a user to inspect</p></div>`;
       const x = enrich(selU);
       const tlIconC = { play: BLUE, check: GOOD, heart: '#A78BFA', dollar: ACCENT_C, zap: ACCENT_V };
-      const timeline = [
+      const fmtAgo = (iso) => { if (!iso) return ''; const t2 = new Date(/Z|\+/.test(iso) ? iso : iso.replace(' ', 'T') + 'Z').getTime(); const mn = Math.max(0, Math.floor((Date.now() - t2) / 60000)); if (mn < 60) return mn + 'm'; const h2 = Math.floor(mn / 60); if (h2 < 24) return h2 + 'h'; return Math.floor(h2 / 24) + 'd'; };
+      const realTl = [];
+      if (real) {
+        (real.recentSessions || []).slice(0, 2).forEach(s2 => realTl.push({ ic: s2.completed ? 'check' : 'play', t: `${s2.completed ? 'Completed' : 'Started'} ${s2.pattern || 'session'}${s2.calm_score != null ? ' · calm ' + s2.calm_score : ''}`, ago: fmtAgo(s2.started_at) }));
+        (real.moods || []).slice(0, 2).forEach(md => realTl.push({ ic: 'heart', t: 'Mood check-in · ' + md.mood, ago: fmtAgo(md.created_at) }));
+        (real.notes || []).slice(0, 1).forEach(nt => realTl.push({ ic: 'zap', t: 'Admin note · ' + nt.note.slice(0, 44), ago: fmtAgo(nt.created_at) }));
+      }
+      const timeline = realTl.length ? realTl.slice(0, 5) : [
         { ic: 'play', t: `Started ${['4-7-8', 'Box', 'Coherent'][selU.id % 3]} session`, ago: x.last },
         { ic: 'check', t: 'Completed Twilight Descent', ago: '1d' },
         { ic: 'heart', t: 'Mood check-in · ' + ['calm', 'anxious', 'tired'][selU.id % 3], ago: '1d' },
@@ -1452,21 +1603,21 @@
           <span style="color:var(--adm-text-3)">${aic('kebab', 16)}</span>
         </div>
 
-        ${x.inSession ? `
+        ${(real && real.liveSession) || (!real && x.inSession) ? `
         <div class="scc-detail-live" style="margin-top:16px">
           ${dot(GOOD, true)}
           <div style="flex:1">
             <div style="font-size:12px;font-weight:500">Currently in session</div>
-            <div style="font-size:10px;color:var(--adm-text-2);margin-top:1px">4-7-8 · Cycle 3/6 · <span class="scc-mono" style="color:${BLUE}">Inhale</span></div>
+            <div style="font-size:10px;color:var(--adm-text-2);margin-top:1px">${esc(real?.liveSession?.pattern || '4-7-8')} · Cycle ${real?.liveSession?.cycles_done ?? 3}${real?.liveSession ? '' : '/6'} · <span class="scc-mono" style="color:${BLUE}">Inhale</span></div>
           </div>
           <button class="scc-btn" id="ud-replay" style="font-size:10px;padding:4px 10px">${aic('replay', 10)}<span>Replay</span></button>
         </div>` : ''}
 
         <div class="scc-statboxes">
           <div class="scc-statbox"><b style="color:${ACCENT_V}">${x.streak}</b><span>Streak</span></div>
-          <div class="scc-statbox"><b style="color:${ACCENT_C}">${selU.sessions}</b><span>Sessions</span></div>
-          <div class="scc-statbox"><b style="color:${GOOD}">${x.calm}</b><span>Calm</span></div>
-          <div class="scc-statbox"><b style="color:${BLUE}">${x.ltv}</b><span>LTV</span></div>
+          <div class="scc-statbox"><b style="color:${ACCENT_C}">${real?.sessionSummary?.total ?? selU.sessions}</b><span>Sessions</span></div>
+          <div class="scc-statbox"><b style="color:${GOOD}">${real?.sessionSummary?.avg_calm ?? x.calm}</b><span>Calm</span></div>
+          <div class="scc-statbox"><b style="color:${BLUE}">${real?.payments?.cents ? '$' + Math.round(real.payments.cents / 100) : x.ltv}</b><span>LTV</span></div>
         </div>
 
         <div style="margin-top:18px">
@@ -1561,10 +1712,135 @@
     const pgP = document.getElementById('pg-prev'), pgN = document.getElementById('pg-next');
     if (pgP) pgP.onclick = () => { usersState.page--; views.users(); };
     if (pgN) pgN.onclick = () => { usersState.page++; views.users(); };
-    ['scc-filters', 'scc-invite', 'ud-impersonate', 'ud-note', 'ud-profile', 'ud-replay'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.onclick = () => toast(`"${el.textContent.trim()}" is a design stub — integration pending`, 'info');
-    });
+    // Invite — create a provisioned account with a temp password
+    const inv = document.getElementById('scc-invite');
+    if (inv) inv.onclick = () => {
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">Invite user</h3>
+        <label class="scc-modal-lbl">Email</label>
+        <input class="scc-modal-input" id="iv-email" type="email" placeholder="name@example.com" maxlength="120"/>
+        <label class="scc-modal-lbl">Name (optional)</label>
+        <input class="scc-modal-input" id="iv-name" placeholder="Display name" maxlength="60"/>
+        <div class="scc-modal-btns"><button class="btn-ghost" data-x>Cancel</button><button class="btn-primary" data-ok>Send invite</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+      modal.veil.querySelector('[data-ok]').onclick = async () => {
+        const email = modal.veil.querySelector('#iv-email').value.trim();
+        const name = modal.veil.querySelector('#iv-name').value.trim();
+        if (!email) { toast('Email required', 'warn'); return; }
+        try {
+          const { data } = await api.post('/admin/users/invite', { email, name });
+          modal.close(() => {
+            const pw = sccModal(`
+              <h3 class="scc-modal-title">Invite created</h3>
+              <p style="font-size:13px;color:var(--adm-text-2);margin-bottom:10px">${esc(email)} can sign in with this temporary password:</p>
+              <div class="scc-modal-input scc-mono" style="text-align:center;font-size:15px;user-select:all">${esc(data.tempPassword)}</div>
+              <div class="scc-modal-btns"><button class="btn-primary" data-x>Done</button></div>`);
+            pw.veil.querySelector('[data-x]').onclick = () => { pw.close(); views.users(); };
+          });
+        } catch (e) { toast(e.response?.data?.error || 'Invite failed', 'warn'); }
+      };
+    };
+
+    // 3 filters — status / role popover
+    const flt = document.getElementById('scc-filters');
+    if (flt) flt.onclick = (ev) => {
+      ev.stopPropagation();
+      const ex = document.getElementById('scc-user-pop');
+      if (ex) { ex.remove(); return; }
+      const pop = document.createElement('div');
+      pop.id = 'scc-user-pop'; pop.className = 'scc-pop';
+      pop.innerHTML = `<div class="scc-pop-head">Filters</div>
+        <div class="scc-pop-sec">Status</div>
+        <div class="scc-pop-opts">${['Any', 'Active', 'Suspended'].map((l, i) => `<button class="scc-pop-opt ${uiState.uStatus === i ? 'on' : ''}" data-fs="${i}">${l}</button>`).join('')}</div>
+        <div class="scc-pop-sec">Role</div>
+        <div class="scc-pop-opts">${['Any', 'Admin', 'User'].map((l, i) => `<button class="scc-pop-opt ${uiState.uRole === i ? 'on' : ''}" data-fr="${i}">${l}</button>`).join('')}</div>`;
+      flt.parentElement.style.position = 'relative';
+      flt.parentElement.appendChild(pop);
+      pop.querySelectorAll('[data-fs]').forEach(b => b.onclick = () => { uiState.uStatus = Number(b.dataset.fs); views.users(); });
+      pop.querySelectorAll('[data-fr]').forEach(b => b.onclick = () => { uiState.uRole = Number(b.dataset.fr); views.users(); });
+      const away = (e2) => { if (!pop.contains(e2.target) && e2.target !== flt) { pop.remove(); document.removeEventListener('click', away); } };
+      setTimeout(() => document.addEventListener('click', away), 0);
+    };
+
+    // Impersonate — swap into the user's session; /admin restores the admin token
+    const imp = document.getElementById('ud-impersonate');
+    if (imp) imp.onclick = async () => {
+      if (!selU) return;
+      const ok = await confirmModal('Impersonate user?', `You will browse the app as ${selU.email}. Navigate back to /admin to return to your own session.`, 'Impersonate', false);
+      if (!ok) return;
+      try {
+        const { data } = await api.post(`/admin/users/${selU.id}/impersonate`);
+        localStorage.setItem('aura_admin_return', localStorage.getItem('aura_token'));
+        localStorage.setItem('aura_token', data.token);
+        if (data.user) localStorage.setItem('aura_user', JSON.stringify(data.user));
+        toast(`Now impersonating ${data.user?.email || selU.email}…`, 'ok');
+        setTimeout(() => { location.href = '/'; }, 600);
+      } catch (e) { toast(e.response?.data?.error || 'Impersonation failed', 'warn'); }
+    };
+
+    // Add note — persisted admin note on the account
+    const nb = document.getElementById('ud-note');
+    if (nb) nb.onclick = () => {
+      if (!selU) return;
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">Add note · ${esc(selU.email)}</h3>
+        <textarea class="scc-modal-input" id="un-note" rows="4" maxlength="500" placeholder="Visible to admins only" style="resize:vertical"></textarea>
+        <div class="scc-modal-btns"><button class="btn-ghost" data-x>Cancel</button><button class="btn-primary" data-ok>Save note</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+      modal.veil.querySelector('[data-ok]').onclick = async () => {
+        const note = modal.veil.querySelector('#un-note').value.trim();
+        if (!note) { toast('Note is empty', 'warn'); return; }
+        try { await api.post(`/admin/users/${selU.id}/notes`, { note }); modal.close(); toast('Note saved', 'ok'); views.users(); }
+        catch (e) { toast(e.response?.data?.error || 'Save failed', 'warn'); }
+      };
+    };
+
+    // Full profile — complete real record
+    const pf = document.getElementById('ud-profile');
+    if (pf) pf.onclick = async () => {
+      if (!selU) return;
+      let r = real;
+      if (!r) { try { r = (await api.get(`/admin/users/${selU.id}`)).data; } catch (e) { toast('Profile load failed', 'warn'); return; } }
+      const ss = r.sessionSummary || {};
+      const row = (l, v) => `<div class="scc-pop-row" style="padding:8px 2px"><span style="flex:1;color:var(--adm-text-2)">${l}</span><em class="scc-mono">${v}</em></div>`;
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">${esc(r.user.display_name || r.user.email.split('@')[0])} · full profile</h3>
+        <div class="scc-modal-list">
+          ${row('Email', esc(r.user.email))}
+          ${row('Role · status', `${esc(r.user.role)} · ${esc(r.user.status)}`)}
+          ${row('Plan', `${esc(r.subscription?.plan || 'free')} (${esc(r.subscription?.status || 'none')})`)}
+          ${row('Goal · length', `${esc(r.user.goal || '—')} · ${r.user.session_length || '—'} min`)}
+          ${row('Sessions', `${ss.total ?? 0} total · ${ss.completed ?? 0} done · ${ss.minutes ?? 0} min`)}
+          ${row('Avg calm', ss.avg_calm ?? '—')}
+          ${row('Payments', `${r.payments?.n ?? 0} · $${((r.payments?.cents || 0) / 100).toFixed(2)}`)}
+          ${row('Joined', fmtDate(r.user.created_at))}
+          ${(r.notes || []).slice(0, 3).map(nt => row('Note', esc(nt.note.slice(0, 60)))).join('')}
+        </div>
+        <div class="scc-modal-btns"><button class="btn-primary" data-x>Close</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+    };
+
+    // Replay — latest real session details
+    const rp = document.getElementById('ud-replay');
+    if (rp) rp.onclick = async () => {
+      if (!selU) return;
+      let r = real;
+      if (!r) { try { r = (await api.get(`/admin/users/${selU.id}`)).data; } catch (e) {} }
+      const s2 = r?.liveSession || (r?.recentSessions || [])[0];
+      if (!s2) { toast('No sessions recorded yet', 'info'); return; }
+      const row = (l, v) => `<div class="scc-pop-row" style="padding:8px 2px"><span style="flex:1;color:var(--adm-text-2)">${l}</span><em class="scc-mono">${v}</em></div>`;
+      const modal = sccModal(`
+        <h3 class="scc-modal-title">Session replay · ${esc(s2.pattern || 'session')}</h3>
+        <div class="scc-modal-list">
+          ${row('Started', fmtDate(s2.started_at))}
+          ${row('Duration', `${Math.round((s2.duration_sec || 0) / 60)} min ${(s2.duration_sec || 0) % 60}s`)}
+          ${row('Cycles', s2.cycles_done ?? '—')}
+          ${row('Calm score', s2.calm_score ?? 'in progress')}
+          ${row('Status', s2.completed ? 'Completed' : 'In progress / abandoned')}
+        </div>
+        <div class="scc-modal-btns"><button class="btn-primary" data-x>Close</button></div>`);
+      modal.veil.querySelector('[data-x]').onclick = () => modal.close();
+    };
 
     // real admin actions
     const ACTIONS = {

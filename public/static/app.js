@@ -4,6 +4,15 @@
   const { api, AuraState, Theme, Prefs, haptic, Tone, PHASE, orbHTML, setOrbPhase, ringHTML, icon, toast, confirmModal, upgradeModal, bgHTML, fmtTime, handleApiError, openModal, attachSlider, setSliderVal } = window.Aura;
   const root = document.getElementById('app');
 
+  // Admin-controlled runtime flags (Super Command Centre → AI Engine). Cached per page load.
+  let RUNTIME_FLAGS = null;
+  const getFlags = async () => {
+    if (RUNTIME_FLAGS) return RUNTIME_FLAGS;
+    try { const { data } = await api.get('/app/config'); RUNTIME_FLAGS = data.flags || {}; }
+    catch { RUNTIME_FLAGS = {}; }
+    return RUNTIME_FLAGS;
+  };
+
   // Back target for each route (drives swipe-back + shared back handling)
   const BACK_TARGET = {
     stats: 'home', programs: 'home', history: 'stats', profile: 'home',
@@ -693,7 +702,7 @@
           </button>`).join('')}
         </div>
         <div id="suggestion-zone">${suggestion ? `
-        <div class="glass" style="padding:16px;display:flex;align-items:center;gap:14px;animation:auraSlideUp 400ms cubic-bezier(0.4,0,0.2,1)">
+        <div class="glass" style="padding:16px;display:flex;align-items:center;gap:14px;animation:auraSlideUp 400ms cubic-bezier(0.4,0,0.2,1);${RUNTIME_FLAGS && RUNTIME_FLAGS.emotion_ambience ? 'box-shadow:0 0 32px rgba(124,58,237,0.35), inset 0 0 0 1px rgba(124,58,237,0.25);' : ''}">
           <span style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(124,58,237,0.4),rgba(34,211,238,0.4));display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon('spark', 16)}</span>
           <span><span style="display:block;font-size:13px;font-weight:500;margin-bottom:2px">AURA suggests: ${suggestion.pattern}</span>
           <span style="display:block;font-size:11px;color:var(--text-tertiary)">${suggestion.reason} · ${suggestion.minutes} min</span></span>
@@ -709,6 +718,7 @@
         try {
           const { data } = await api.post('/app/moods', { mood: selected });
           suggestion = data.suggestion;
+          await getFlags();
         } catch (err) { handleApiError(err); }
         render();
       });

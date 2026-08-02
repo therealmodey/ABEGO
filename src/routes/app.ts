@@ -5,9 +5,16 @@ import {
   checkAndIncrementUsage, FREE_LIMITS, cacheGet, cacheSet, cacheDel,
   logActivity, clientIp,
 } from '../lib/middleware'
+import { getAiConfig } from '../lib/aiconfig'
 
 const app = new Hono<AppEnv>()
 app.use('*', requireAuth)
+
+// ---------- Runtime config (admin-controlled AI flags for the client) ----------
+app.get('/config', async (c) => {
+  const cfg = await getAiConfig(c.env.DB)
+  return c.json({ version: cfg.version, flags: cfg.flags })
+})
 
 // ---------- Profile / preferences ----------
 app.put('/profile', async (c) => {
@@ -160,10 +167,35 @@ app.post('/moods', async (c) => {
 
   await c.env.DB.prepare('INSERT INTO moods (user_id, mood) VALUES (?, ?)').bind(u.sub, mood).run()
 
-  // Personalization: adapt suggestion using time of day + user's evening/morning performance
+  // Personalization driven by the admin-tuned AI engine config (Super Command Centre → AI Engine)
+  const ai = await getAiConfig(c.env.DB)
   const hour = new Date().getUTCHours()
   const plan = { ...MOOD_PLANS[mood] }
-  if (mood !== 'tired' && (hour >= 20 || hour <= 4)) { plan.exhale += 1; plan.reason += ' · evening pace, longer exhale' }
+
+  // auto_pacing flag gates time-of-day pacing adjustments
+  if (ai.flags.auto_pacing && mood !== 'tired' && (hour >= 20 || hour <= 4)) {
+    plan.exhale += 1; plan.reason += ' · evening pace, longer exhale'
+  }
+  // stress_sensitivity: high sensitivity extends the calming exhale for anxious users
+  if (mood === 'anxious' && ai.sliders.stress_sensitivity >= 0.7) {
+    plan.exhale += 1; plan.reason += ' · high stress sensitivity, extended exhale'
+  }
+  // cross_session learning: if recent calm trend is low, lengthen the session
+  if (ai.flags.cross_session) {
+    const recent = await c.env.DB.prepare(
+      "SELECT AVG(calm_score) AS s FROM sessions WHERE user_id = ? AND completed = 1 AND started_at > datetime('now','-7 days')"
+    ).bind(u.sub).first<{ s: number | null }>()
+    if (recent?.s != null && recent.s < 55) { plan.minutes += 2; plan.reason += ' · extended — recent calm trending low' }
+  }
+  // exploration: deterministic per user/day bucket tries a gentle variant
+  const dayOfYear = Math.floor((Date.now() - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 86400000)
+  if ((Number(u.sub) + dayOfYear) % 100 < Math.round(ai.sliders.exploration * 100)) {
+    plan.hold += 1; plan.reason += ' · exploring a new variant'
+  }
+  // llm_guidance: richer guidance copy appended to the suggestion
+  if (ai.flags.llm_guidance) {
+    plan.reason += ' · Guidance: settle your shoulders, soften your jaw, and let each exhale sink a little deeper.'
+  }
 
   await logActivity(c.env.DB, u.sub, 'mood_checkin', { mood }, clientIp(c))
   return c.json({ mood, suggestion: plan }, 201)

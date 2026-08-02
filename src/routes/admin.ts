@@ -2,8 +2,10 @@
 import { Hono } from 'hono'
 import {
   type AppEnv, requireAuth, requireAdmin, rateLimit,
-  logAudit, clientIp, cacheGet, cacheSet, cacheDel,
+  logAudit, clientIp, cacheGet, cacheSet, cacheDel, jwtSecret,
 } from '../lib/middleware'
+import { signJwt, hashPassword } from '../lib/auth'
+import { getAiConfig } from '../lib/aiconfig'
 
 const admin = new Hono<AppEnv>()
 admin.use('*', requireAuth)
@@ -233,7 +235,7 @@ const heatGrid = () => {
   return g
 }
 
-const SCC_DATA: Record<string, () => unknown> = {
+const SCC_DATA: Record<string, (n?: number) => unknown> = {
   overview: () => ({
     retention: { pct: 62, bars: [{ l: 'D1', v: 94 }, { l: 'D3', v: 78 }, { l: 'D7', v: 62 }, { l: 'D30', v: 41 }] },
     aiEvents: [
@@ -249,9 +251,9 @@ const SCC_DATA: Record<string, () => unknown> = {
       { name: 'Realtime DB', ms: 46, load: 0.39, ok: true },
     ],
   }),
-  live: () => ({
+  live: (n = 12) => ({
     stats: { live: 142, inhaling: 48, holding: 31, exhaling: 58, flagged: 5 },
-    timeline: genLine(12, 120, 30, 2).map((v) => Math.round(v)),
+    timeline: genLine(Math.max(8, Math.min(n, 24)), 120, 30, 2).map((v) => Math.round(v)),
     phaseDist: [{ l: 'Inhale', v: 34, c: '#60A5FA' }, { l: 'Hold', v: 22, c: '#A78BFA' }, { l: 'Exhale', v: 41, c: '#34D399' }, { l: 'Rest', v: 3, c: '#64748B' }],
     anomalies: [
       { t: 'High stress cluster', d: '5 users · IN-BLR', ago: 'now', sev: 'amber' },
@@ -270,7 +272,7 @@ const SCC_DATA: Record<string, () => unknown> = {
       { name: 'Kai W.', sid: 'ses_66f3', region: 'Sydney', pattern: '4-4-6', phase: 'exhale', stress: 0.38, calm: 79, hr: 59, dur: '4:49', hot: false },
     ],
   }),
-  ai: () => ({
+  ai: (n = 30) => ({
     model: { version: 'aura-2.4.1', status: 'Stable' },
     kpis: { adaptations: 42180, effectiveness: 0.82, latencyMs: 134 },
     sliders: [
@@ -292,7 +294,7 @@ const SCC_DATA: Record<string, () => unknown> = {
       pattern: [4, 7, 8], confidence: 0.87, fallback: '4·4·6',
     },
     rollout: { pct: 82, users: '34,821 / 42,410', prev: { v: '2.4.0', pct: 16 }, canary: { v: '2.5.0', pct: 2 } },
-    effectiveness: { a: genLine(30, 74, 8, 0.3), b: genLine(30, 12, 4, 0.05) },
+    effectiveness: { a: genLine(n, 74, 8, 0.3), b: genLine(n, 12, 4, 0.05) },
   }),
   biometrics: () => ({
     kpis: { hrReduction: -8.2, hrvImprovement: 14.6, recovery: '4:12', coherence: 72 },
@@ -367,10 +369,10 @@ const SCC_DATA: Record<string, () => unknown> = {
       { name: 'May cohort', c: '#34D399', data: genLine(12, 16, 3, 3.1) },
     ] },
   }),
-  health: () => ({
+  health: (n = 24) => ({
     banner: { title: 'All systems operational', sub: '14 services · 4 regions · uptime 99.982% last 90 days', regions: [{ l: 'US-E', ok: true }, { l: 'US-W', ok: true }, { l: 'EU-C', ok: true }, { l: 'APAC', ok: false }] },
     kpis: { p50: '82ms', errRate: '0.08%', audioFails: 14, ws: 4120 },
-    latency: { p50: genLine(24, 80, 10, 0.2), p95: genLine(24, 180, 25, 0.4), p99: genLine(24, 290, 40, 0.6) },
+    latency: { p50: genLine(n, 80, 10, 0.2), p95: genLine(n, 180, 25, 0.4), p99: genLine(n, 290, 40, 0.6) },
     services: [
       { name: 'API Gateway', ms: 82, up: '99.99%', st: 'ok' }, { name: 'Auth', ms: 24, up: '99.99%', st: 'ok' },
       { name: 'Session DB', ms: 46, up: '99.98%', st: 'ok' }, { name: 'AI Inference', ms: 134, up: '99.95%', st: 'ok' },
@@ -388,7 +390,7 @@ const SCC_DATA: Record<string, () => unknown> = {
       { t: 'Feature flag change', code: 'FLG_089', sub: 'emotion_ambience → off', ago: '13h', sev: 'violet' },
     ],
   }),
-  analytics: () => ({
+  analytics: (n = 20) => ({
     kpis: { calmImprovement: '+18.4', conversion: '74.2%', depth: '6.4', effective: '82.6%' },
     cohorts: [
       { w: 'Jun 03', n: '1,240', v: [100, 74, 61, 52, 47, 44, 42, 41] },
@@ -409,38 +411,216 @@ const SCC_DATA: Record<string, () => unknown> = {
       { l: 'Cycle 4', v: 5 }, { l: 'Cycle 5', v: 3 }, { l: 'Cycle 6+', v: 2 },
     ],
     dropInsight: 'Cycle 2 drop-off is elevated. Users of the 4·7·8 pattern with stress > 0.6 leave at 22%. Consider a shorter hold for first-time high-stress users.',
-    calm: { a: genLine(20, 64, 6, 0.5), b: genLine(20, 58, 5, 0.35) },
+    calm: { a: genLine(n, 64, 6, 0.5), b: genLine(n, 58, 5, 0.35) },
+    calmP50: { a: genLine(n, 60, 5, 0.45), b: genLine(n, 54, 4, 0.3) },
+    calmP90: { a: genLine(n, 78, 7, 0.55), b: genLine(n, 70, 6, 0.4) },
+    cohortsMonthly: [
+      { w: 'Mar', n: '4,820', v: [100, 71, 58, 49, 44, 41, 39, 38] },
+      { w: 'Apr', n: '5,410', v: [100, 74, 61, 53, 47, 44, 42, null] },
+      { w: 'May', n: '5,960', v: [100, 77, 64, 56, 50, 46, null, null] },
+      { w: 'Jun', n: '6,540', v: [100, 79, 67, 59, 53, null, null, null] },
+      { w: 'Jul', n: '7,180', v: [100, 82, 70, 61, null, null, null, null] },
+    ],
     scatter: Array.from({ length: 42 }, (_, i) => ({ x: 40 + ((i * 149) % 660), y: 200 - ((i * 97) % 170) })),
     correlation: 0.68,
   }),
 }
 
+// ---------- SCC modules: mock series + REAL persisted overlays (config / rules / experiments) ----------
+const RANGE_N: Record<string, number> = { '24h': 24, '7d': 14, '30d': 30, '90d': 90, 'ytd': 40 }
+
+
 admin.get('/scc/:module', async (c) => {
   const mod = c.req.param('module')
   const fn = SCC_DATA[mod]
   if (!fn) return c.json({ error: 'Unknown module' }, 404)
-  return c.json({ module: mod, mock: true, data: fn() })
+  const n = RANGE_N[c.req.query('range') || ''] || undefined
+  const data = fn(n) as Record<string, unknown>
+
+  // REAL overlays — DB is source of truth where persistence exists
+  if (mod === 'ai') {
+    const cfg = await getAiConfig(c.env.DB)
+    const sliders = data.sliders as Array<{ id: string; v: number }>
+    sliders.forEach((s) => { const v = (cfg.sliders as Record<string, number>)[s.id]; if (typeof v === 'number') s.v = v })
+    const flags = data.flags as Array<{ id: string; on: boolean }>
+    flags.forEach((f) => { const v = (cfg.flags as Record<string, boolean>)[f.id]; if (typeof v === 'boolean') f.on = v })
+    ;(data.model as Record<string, unknown>).version = cfg.version
+    return c.json({ module: mod, mock: false, data })
+  }
+  if (mod === 'notifications') {
+    const { results } = await c.env.DB.prepare('SELECT id, name, trigger, body, sent, open_rate, enabled FROM notification_rules ORDER BY id').all()
+    data.rules = (results as Array<Record<string, unknown>>).map((r) => ({
+      id: r.id, name: r.name, trigger: r.trigger, body: r.body,
+      sent: Number(r.sent).toLocaleString('en-US'), open: Math.round(Number(r.open_rate)), on: !!r.enabled,
+    }))
+    return c.json({ module: mod, mock: false, data })
+  }
+  if (mod === 'experiments') {
+    const { results } = await c.env.DB.prepare("SELECT id, name, days, status, variants, users, lift, conf, winner FROM experiments ORDER BY created_at DESC, id DESC").all()
+    const rows = (results as Array<Record<string, unknown>>).map((r) => ({
+      id: r.id, name: r.name, days: r.days, status: r.status, variants: r.variants,
+      users: Number(r.users).toLocaleString('en-US'), lift: r.lift, conf: r.conf, winner: r.winner,
+    }))
+    data.rows = rows
+    const feat = rows.find((r) => r.id === 'exp_039')
+    if (feat) {
+      const f = data.featured as Record<string, unknown>
+      f.status = feat.status; f.winner = feat.winner
+    }
+    const running = rows.filter((r) => r.status === 'Running' || r.status === 'Winning').length
+    ;(data.kpis as Record<string, unknown>).live = running
+    return c.json({ module: mod, mock: false, data })
+  }
+  return c.json({ module: mod, mock: true, data })
 })
 
-// Config-write stubs — validated + audit-logged; persistence wired to KV/D1 later.
+// ---------- AI config: REAL persistence (read by the user-app suggestion engine) ----------
 admin.put('/scc/ai', async (c) => {
   const me = c.get('user')
   const b = await c.req.json().catch(() => ({}))
-  const payload: Record<string, unknown> = {}
-  if (b.sliders && typeof b.sliders === 'object') payload.sliders = b.sliders
-  if (b.flags && typeof b.flags === 'object') payload.flags = b.flags
-  if (!Object.keys(payload).length) return c.json({ error: 'Nothing to update' }, 400)
-  await logAudit(c.env.DB, me.sub, 'ai_config_update', 'ai_model', 0, payload, clientIp(c))
-  return c.json({ ok: true, persisted: false, note: 'Config stub — wire to model service later' })
+  const patch: Record<string, unknown> = {}
+  if (b.sliders && typeof b.sliders === 'object') patch.sliders = b.sliders
+  if (b.flags && typeof b.flags === 'object') patch.flags = b.flags
+  if (!Object.keys(patch).length) return c.json({ error: 'Nothing to update' }, 400)
+
+  const cur = await getAiConfig(c.env.DB)
+  const next = {
+    ...cur,
+    sliders: { ...cur.sliders, ...(patch.sliders as object || {}) },
+    flags: { ...cur.flags, ...(patch.flags as object || {}) },
+  }
+  // validate slider bounds
+  for (const [k, v] of Object.entries(next.sliders)) {
+    if (typeof v !== 'number' || v < 0 || v > 1) return c.json({ error: `Slider ${k} must be 0..1` }, 400)
+  }
+  await c.env.DB.prepare(
+    "INSERT INTO app_config (key, value, updated_at, updated_by) VALUES ('ai_config', ?, datetime('now'), ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by"
+  ).bind(JSON.stringify(next), me.sub).run()
+  cacheDel('ai_config')
+  await logAudit(c.env.DB, me.sub, 'ai_config_update', 'ai_model', 0, patch, clientIp(c))
+  return c.json({ ok: true, persisted: true, config: next })
 })
 
+// ---------- Notification rules: REAL persistence ----------
 admin.put('/scc/notifications/:id', async (c) => {
   const me = c.get('user')
   const id = parseInt(c.req.param('id'), 10)
   const b = await c.req.json().catch(() => ({}))
   if (typeof b.enabled !== 'boolean') return c.json({ error: 'enabled boolean required' }, 400)
+  const r = await c.env.DB.prepare('UPDATE notification_rules SET enabled = ? WHERE id = ?').bind(b.enabled ? 1 : 0, id).run()
+  if (!r.meta.changes) return c.json({ error: 'Rule not found' }, 404)
   await logAudit(c.env.DB, me.sub, 'notification_rule_toggle', 'notification_rule', id, { enabled: b.enabled }, clientIp(c))
-  return c.json({ ok: true, id, enabled: b.enabled, persisted: false })
+  return c.json({ ok: true, id, enabled: b.enabled, persisted: true })
+})
+
+admin.post('/scc/notifications', async (c) => {
+  const me = c.get('user')
+  const b = await c.req.json().catch(() => ({}))
+  const name = String(b.name || '').trim().slice(0, 80)
+  const trigger = String(b.trigger || '').trim().slice(0, 120)
+  const body = String(b.body || '').trim().slice(0, 240)
+  if (!name || !trigger) return c.json({ error: 'name and trigger required' }, 400)
+  const r = await c.env.DB.prepare('INSERT INTO notification_rules (name, trigger, body, enabled) VALUES (?, ?, ?, 1)').bind(name, trigger, body).run()
+  await logAudit(c.env.DB, me.sub, 'notification_rule_create', 'notification_rule', r.meta.last_row_id as number, { name, trigger }, clientIp(c))
+  return c.json({ ok: true, id: r.meta.last_row_id, persisted: true }, 201)
+})
+
+// ---------- Experiments: REAL lifecycle ----------
+admin.put('/scc/experiments/:id', async (c) => {
+  const me = c.get('user')
+  const id = c.req.param('id')
+  const b = await c.req.json().catch(() => ({}))
+  const status = String(b.status || '')
+  if (!['Running', 'Winning', 'Paused', 'Complete'].includes(status)) return c.json({ error: 'Invalid status' }, 400)
+  const winner = b.winner ? String(b.winner).slice(0, 10) : null
+  const r = await c.env.DB.prepare('UPDATE experiments SET status = ?, winner = COALESCE(?, winner) WHERE id = ?').bind(status, winner, id).run()
+  if (!r.meta.changes) return c.json({ error: 'Experiment not found' }, 404)
+  await logAudit(c.env.DB, me.sub, 'experiment_update', 'experiment', 0, { id, status, winner }, clientIp(c))
+  return c.json({ ok: true, id, status, winner, persisted: true })
+})
+
+admin.post('/scc/experiments', async (c) => {
+  const me = c.get('user')
+  const b = await c.req.json().catch(() => ({}))
+  const name = String(b.name || '').trim().slice(0, 100)
+  if (!name) return c.json({ error: 'name required' }, 400)
+  const variants = Number.isInteger(b.variants) && b.variants >= 2 && b.variants <= 5 ? b.variants : 2
+  const nextNum = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM experiments").first<{ n: number }>()
+  const id = 'exp_' + String(42 + (nextNum?.n ?? 0)).padStart(3, '0')
+  await c.env.DB.prepare("INSERT INTO experiments (id, name, days, status, variants, users, lift, conf) VALUES (?, ?, 0, 'Running', ?, 0, '—', 0)").bind(id, name, variants).run()
+  await logAudit(c.env.DB, me.sub, 'experiment_create', 'experiment', 0, { id, name, variants }, clientIp(c))
+  return c.json({ ok: true, id, persisted: true }, 201)
+})
+
+// ---------- Users: invite / impersonate / notes / full profile ----------
+admin.post('/users/invite', async (c) => {
+  const me = c.get('user')
+  const b = await c.req.json().catch(() => ({}))
+  const email = String(b.email || '').trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Valid email required' }, 400)
+  const exists = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
+  if (exists) return c.json({ error: 'A user with this email already exists' }, 409)
+
+  const temp = 'Aura-' + Math.random().toString(36).slice(2, 8) + '-' + Math.floor(Math.random() * 90 + 10)
+  const hash = await hashPassword(temp)
+  const r = await c.env.DB.prepare("INSERT INTO users (email, password_hash, role, status) VALUES (?, ?, 'user', 'active')").bind(email, hash).run()
+  const uid = r.meta.last_row_id as number
+  const name = String(b.name || '').trim().slice(0, 60) || email.split('@')[0]
+  await c.env.DB.prepare('INSERT INTO profiles (user_id, display_name) VALUES (?, ?)').bind(uid, name).run()
+  await logAudit(c.env.DB, me.sub, 'invite_user', 'user', uid, { email }, clientIp(c))
+  return c.json({ ok: true, id: uid, email, tempPassword: temp }, 201)
+})
+
+admin.post('/users/:id/impersonate', async (c) => {
+  const me = c.get('user')
+  const id = parseInt(c.req.param('id'), 10)
+  if (id === me.sub) return c.json({ error: 'You are already yourself.' }, 400)
+  const target = await c.env.DB.prepare("SELECT id, email, role, status FROM users WHERE id = ?").bind(id).first<{ id: number; email: string; role: string; status: string }>()
+  if (!target) return c.json({ error: 'User not found' }, 404)
+  if (target.status !== 'active') return c.json({ error: 'Can only impersonate active users' }, 400)
+  const plan = await c.env.DB.prepare("SELECT plan FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(id).first<{ plan: string }>()
+  const token = await signJwt({ sub: target.id, email: target.email, role: target.role, plan: plan?.plan || 'free', imp_by: me.sub }, jwtSecret(c))
+  await logAudit(c.env.DB, me.sub, 'impersonate_user', 'user', id, { email: target.email }, clientIp(c))
+  return c.json({ ok: true, token, user: { id: target.id, email: target.email, role: target.role } })
+})
+
+admin.post('/users/:id/notes', async (c) => {
+  const me = c.get('user')
+  const id = parseInt(c.req.param('id'), 10)
+  const b = await c.req.json().catch(() => ({}))
+  const note = String(b.note || '').trim().slice(0, 500)
+  if (!note) return c.json({ error: 'Note text required' }, 400)
+  const target = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(id).first()
+  if (!target) return c.json({ error: 'User not found' }, 404)
+  const r = await c.env.DB.prepare('INSERT INTO admin_notes (user_id, admin_id, note) VALUES (?, ?, ?)').bind(id, me.sub, note).run()
+  await logAudit(c.env.DB, me.sub, 'user_note_add', 'user', id, { note: note.slice(0, 80) }, clientIp(c))
+  return c.json({ ok: true, id: r.meta.last_row_id }, 201)
+})
+
+// Full profile: everything real about one user
+admin.get('/users/:id', async (c) => {
+  const id = parseInt(c.req.param('id'), 10)
+  if (!Number.isInteger(id)) return c.json({ error: 'Invalid id' }, 400)
+  const user = await c.env.DB.prepare(
+    `SELECT u.id, u.email, u.role, u.status, u.created_at, p.display_name, p.goal, p.baseline_stress, p.session_length, p.prefs_json, p.onboarded
+     FROM users u LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = ?`
+  ).bind(id).first()
+  if (!user) return c.json({ error: 'User not found' }, 404)
+
+  const [sub, sessions, recentSessions, moods, payments, notes, liveSession] = await Promise.all([
+    c.env.DB.prepare("SELECT plan, status, end_date FROM subscriptions WHERE user_id = ? ORDER BY id DESC LIMIT 1").bind(id).first(),
+    c.env.DB.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completed, COALESCE(SUM(duration_sec),0)/60 AS minutes, ROUND(AVG(CASE WHEN completed = 1 THEN calm_score END)) AS avg_calm FROM sessions WHERE user_id = ?").bind(id).first(),
+    c.env.DB.prepare("SELECT id, program_id, pattern, duration_sec, cycles_done, calm_score, completed, started_at FROM sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT 5").bind(id).all(),
+    c.env.DB.prepare("SELECT mood, created_at FROM moods WHERE user_id = ? ORDER BY created_at DESC LIMIT 5").bind(id).all(),
+    c.env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN status = 'succeeded' THEN amount_cents ELSE 0 END),0) AS cents FROM payments WHERE user_id = ?").bind(id).first(),
+    c.env.DB.prepare("SELECT an.id, an.note, an.created_at, u.email AS admin_email FROM admin_notes an JOIN users u ON u.id = an.admin_id WHERE an.user_id = ? ORDER BY an.created_at DESC LIMIT 10").bind(id).all(),
+    c.env.DB.prepare("SELECT id, pattern, started_at, cycles_done FROM sessions WHERE user_id = ? AND completed = 0 AND started_at > datetime('now','-30 minutes') ORDER BY started_at DESC LIMIT 1").bind(id).first(),
+  ])
+  return c.json({
+    user, subscription: sub || null, sessionSummary: sessions,
+    recentSessions: recentSessions.results, moods: moods.results,
+    payments, notes: notes.results, liveSession: liveSession || null,
+  })
 })
 
 export default admin

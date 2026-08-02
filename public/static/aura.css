@@ -1286,3 +1286,22 @@ html[data-theme="light"] .scc-pill { color: #6D28D9; }
 /* link-style inline button */
 #aura-admin .scc-link { background: none; border: none; cursor: pointer; font-size: 11px; color: var(--adm-text-2); font-family: inherit; padding: 0; transition: color 0.2s; }
 #aura-admin .scc-link:hover { color: var(--adm-accent); }
+
+/* ===== SCC v2 — functional layer: popovers + input modals ===== */
+.scc-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:60;min-width:280px;max-width:340px;background:var(--adm-card);border:1px solid var(--adm-border);border-radius:14px;box-shadow:0 18px 40px rgba(0,0,0,0.35);padding:10px 12px;animation:auraSlideUp 220ms cubic-bezier(0.4,0,0.2,1)}
+.scc-pop-head{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--adm-text-2);font-weight:600;padding:4px 2px 8px;border-bottom:1px solid var(--adm-border);margin-bottom:6px}
+.scc-pop-row{display:flex;align-items:flex-start;gap:8px;padding:7px 2px;font-size:12px;color:var(--adm-text);border-bottom:1px solid var(--adm-border)}
+.scc-pop-row:last-child{border-bottom:none}
+.scc-pop-row em{font-style:normal;font-size:10.5px;color:var(--adm-text-3);margin-left:auto;flex-shrink:0}
+.scc-pop-sec{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--adm-text-3);font-weight:600;margin:8px 2px 5px}
+.scc-pop-opts{display:flex;gap:6px;flex-wrap:wrap}
+.scc-pop-opt{font-size:11px;padding:5px 12px;border-radius:9px;border:1px solid var(--adm-border);background:transparent;color:var(--adm-text-2);cursor:pointer;transition:all 160ms}
+.scc-pop-opt:hover{color:var(--adm-text);border-color:var(--adm-text-3)}
+.scc-pop-opt.on{background:linear-gradient(90deg,rgba(139,92,246,0.25),rgba(34,211,238,0.2));border-color:rgba(139,92,246,0.5);color:var(--adm-text)}
+.scc-modal .scc-modal-title{font-size:16px;font-weight:600;letter-spacing:-0.2px;margin-bottom:14px;color:var(--adm-text, inherit)}
+.scc-modal .scc-modal-lbl{display:block;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--adm-text-2, var(--text-tertiary));font-weight:600;margin:10px 0 5px}
+.scc-modal .scc-modal-input{width:100%;padding:11px 13px;border-radius:12px;border:1px solid var(--adm-border, rgba(255,255,255,0.14));background:rgba(120,130,150,0.08);color:inherit;font-size:13.5px;font-family:inherit;outline:none;margin-bottom:2px}
+.scc-modal .scc-modal-input:focus{border-color:rgba(139,92,246,0.55);box-shadow:0 0 0 3px rgba(139,92,246,0.15)}
+.scc-modal .scc-modal-btns{display:flex;gap:10px;margin-top:16px}
+.scc-modal .scc-modal-btns .btn-ghost,.scc-modal .scc-modal-btns .btn-primary{flex:1}
+.scc-modal .scc-modal-list{max-height:52vh;overflow-y:auto;margin:2px 0}
