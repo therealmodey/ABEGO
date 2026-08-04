@@ -673,6 +673,21 @@
   }
 
   // ================= 08 MOOD CHECK-IN =================
+  // RENDER-ONCE screen. Changing mood patches only the nodes that actually
+  // differ (selection glow, suggestion copy, CTA state) — the <section>, the
+  // ambient background and every backdrop-filtered card keep their DOM
+  // identity for the whole visit.
+  //
+  // Why: this screen used to call render() -> root.innerHTML on every mood
+  // tap, which per tap (a) replayed .screen's 420ms auraScreenIn enter
+  // animation, so the entire screen slid 12px and rescaled, (b) restarted the
+  // 45s auraAmbientDrift keyframes on a freshly created .aura-bg, snapping the
+  // gradient back to 0%, (c) re-rasterized four backdrop-filter:blur(24px)
+  // glass cards plus the 8-layer star field, and (d) re-inserted the
+  // suggestion card, replaying its slide-up from scratch. Those four things
+  // landing together on one frame — after a network round trip — was the
+  // jitter/stutter. Nothing below changes layout, spacing or visuals; only
+  // non-layout properties (opacity / box-shadow / transform) are animated.
   routes.mood = function () {
     const moods = [
       { id: 'anxious', label: 'Anxious', sub: 'racing thoughts', phase: 'inhale' },
@@ -680,55 +695,151 @@
       { id: 'tired', label: 'Tired', sub: 'low energy', phase: 'hold' },
       { id: 'focused', label: 'Focused', sub: 'sharp & clear', phase: 'idle' },
     ];
-    let selected = null, suggestion = null;
-    function render() {
-      const now = new Date();
-      const dayStr = now.toLocaleDateString('en-US', { weekday: 'long' });
-      const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
-      root.innerHTML = `${bgHTML()}
-      <section class="screen screen--scroll" style="padding:24px">
-        <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:26px">
-          <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
-          <span class="overline">Check-in</span><span style="width:40px"></span>
-        </header>
-        <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:6px">${dayStr} · ${timeStr}</p>
-        <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:28px">How are you feeling<br/>right now?</h1>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
-          ${moods.map((m) => `
-          <button class="glass mood-card" data-mood="${m.id}" style="padding:20px 16px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;border-radius:20px;transition:all 400ms cubic-bezier(0.4,0,0.2,1);${selected === m.id ? `box-shadow:0 0 32px ${PHASE[m.phase].glow}, inset 0 0 0 1px ${PHASE[m.phase].a}66;` : ''}">
-            <span style="width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), ${PHASE[m.phase].a} 40%, ${PHASE[m.phase].b} 80%);box-shadow:0 0 18px ${PHASE[m.phase].glow}"></span>
-            <span style="text-align:left"><span style="display:block;font-size:15px;font-weight:500">${m.label}</span>
-            <span style="display:block;font-size:11px;color:var(--text-tertiary);margin-top:2px">${m.sub}</span></span>
-          </button>`).join('')}
-        </div>
-        <div id="suggestion-zone">${suggestion ? `
-        <div class="glass" style="padding:16px;display:flex;align-items:center;gap:14px;animation:auraSlideUp 400ms cubic-bezier(0.4,0,0.2,1);${RUNTIME_FLAGS && RUNTIME_FLAGS.emotion_ambience ? 'box-shadow:0 0 32px rgba(124,58,237,0.35), inset 0 0 0 1px rgba(124,58,237,0.25);' : ''}">
-          <span style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(124,58,237,0.4),rgba(34,211,238,0.4));display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon('spark', 16)}</span>
-          <span><span style="display:block;font-size:13px;font-weight:500;margin-bottom:2px">AURA suggests: ${suggestion.pattern}</span>
-          <span style="display:block;font-size:11px;color:var(--text-tertiary)">${suggestion.reason} · ${suggestion.minutes} min</span></span>
-        </div>` : ''}</div>
-        <div style="flex:1"></div>
-        <div style="padding-bottom:24px">
-          <button class="btn-primary" id="begin-btn" ${!selected ? 'disabled' : ''}>Begin session</button>
-        </div>
-      </section>`;
-      document.getElementById('back-btn').onclick = () => go('home');
-      document.querySelectorAll('.mood-card').forEach((b) => b.onclick = async () => {
-        selected = b.dataset.mood;
-        try {
-          const { data } = await api.post('/app/moods', { mood: selected });
-          suggestion = data.suggestion;
-          await getFlags();
-        } catch (err) { handleApiError(err); }
-        render();
-      });
-      document.getElementById('begin-btn').onclick = () => {
-        if (!suggestion) return;
-        const cycleSec = suggestion.inhale + suggestion.hold + suggestion.exhale;
-        startSession({ inhale: suggestion.inhale, hold: suggestion.hold, exhale: suggestion.exhale, cycles: Math.max(2, Math.round(suggestion.minutes * 60 / cycleSec)), name: suggestion.pattern.split(' ')[0], mood: selected });
-      };
+    const phaseOf = {};
+    moods.forEach((m) => { phaseOf[m.id] = m.phase; });
+
+    const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const EASE = 'cubic-bezier(0.4,0,0.2,1)';   // ease-in-out, matches design tokens
+    const HALF = reduced ? 0 : 190;             // half of the copy crossfade timeline
+
+    // Selected-card glow. Same pixels as before, but the shadow LIST is
+    // written to match the structure of the active theme's base .glass shadow
+    // (equal count, same inset/outset ordering). box-shadow only interpolates
+    // between structurally identical lists — otherwise it hard-swaps at the
+    // midpoint. The zero-size fully transparent entries paint nothing and
+    // exist purely to line the lists up, which is what lets the glow ease in
+    // and out. Outset and inset shadows cover disjoint regions, so reordering
+    // them is visually identical to the original declaration.
+    const NIL_INSET = 'inset 0 0 0 0 rgba(0,0,0,0)';
+    const NIL_OUTSET = '0 0 0 0 rgba(0,0,0,0)';
+    function glowFor(phase) {
+      const p = PHASE[phase] || PHASE.idle;
+      const ring = `inset 0 0 0 1px ${p.a}66`;
+      const glow = `0 0 32px ${p.glow}`;
+      // light .glass = [inset, inset, outset, outset]; dark .glass = [inset, outset]
+      return Theme.mode === 'light'
+        ? `${ring}, ${NIL_INSET}, ${glow}, ${NIL_OUTSET}`
+        : `${ring}, ${glow}`;
     }
-    render();
+
+    const state = { selected: null, suggestion: null };
+    let reqToken = 0;      // guards against out-of-order mood responses
+    let pending = null;    // mood id in flight — dedupes double taps
+    let fadeTimer = 0;
+
+    // Captured once: recomputing this per render could change the string
+    // width mid-interaction and reflow the header block.
+    const now = new Date();
+    const dayStr = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+
+    root.innerHTML = `${bgHTML()}
+    <section class="screen screen--scroll" style="padding:24px">
+      <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:26px">
+        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <span class="overline">Check-in</span><span style="width:40px"></span>
+      </header>
+      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:6px">${dayStr} · ${timeStr}</p>
+      <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:28px">How are you feeling<br/>right now?</h1>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+        ${moods.map((m) => `
+        <button class="glass mood-card" data-mood="${m.id}" aria-pressed="false" style="padding:20px 16px;display:flex;flex-direction:column;align-items:flex-start;gap:12px;border-radius:20px;transition:box-shadow 400ms ${EASE}, transform 400ms ${EASE}">
+          <span style="width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), ${PHASE[m.phase].a} 40%, ${PHASE[m.phase].b} 80%);box-shadow:0 0 18px ${PHASE[m.phase].glow}"></span>
+          <span style="text-align:left"><span style="display:block;font-size:15px;font-weight:500">${m.label}</span>
+          <span style="display:block;font-size:11px;color:var(--text-tertiary);margin-top:2px">${m.sub}</span></span>
+        </button>`).join('')}
+      </div>
+      <div id="suggestion-zone"></div>
+      <div style="flex:1"></div>
+      <div style="padding-bottom:24px">
+        <button class="btn-primary" id="begin-btn" disabled>Begin session</button>
+      </div>
+    </section>`;
+
+    const cards = Array.prototype.slice.call(document.querySelectorAll('.mood-card'));
+    const zone = document.getElementById('suggestion-zone');
+    const beginBtn = document.getElementById('begin-btn');
+
+    // Suggestion card markup — unchanged, with hooks for in-place patching.
+    function suggestionHTML(title, sub) {
+      return `
+      <div class="glass" data-sg style="padding:16px;display:flex;align-items:center;gap:14px;animation:auraSlideUp 400ms ${EASE};${RUNTIME_FLAGS && RUNTIME_FLAGS.emotion_ambience ? 'box-shadow:0 0 32px rgba(124,58,237,0.35), inset 0 0 0 1px rgba(124,58,237,0.25);' : ''}">
+        <span style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(124,58,237,0.4),rgba(34,211,238,0.4));display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon('spark', 16)}</span>
+        <span data-sg-body><span data-sg-title style="display:block;font-size:13px;font-weight:500;margin-bottom:2px">${title}</span>
+        <span data-sg-sub style="display:block;font-size:11px;color:var(--text-tertiary)">${sub}</span></span>
+      </div>`;
+    }
+
+    // Selection: one composited commit across all four cards. Same nodes, so
+    // box-shadow interpolates over 400ms ease-in-out instead of snapping.
+    function paintSelection(id) {
+      cards.forEach((c) => {
+        const on = c.dataset.mood === id;
+        c.style.boxShadow = on ? glowFor(phaseOf[c.dataset.mood]) : '';
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+
+    // Suggestion: first reveal keeps the design's slide-up. Later switches
+    // crossfade the copy on a SINGLE timeline and swap the text at the
+    // zero-opacity midpoint, so any reflow from a different line count
+    // happens while the content is invisible — no visible shift or flicker.
+    function paintSuggestion(sg) {
+      const title = `AURA suggests: ${sg.pattern}`;
+      const sub = `${sg.reason} · ${sg.minutes} min`;
+      const card = zone.querySelector('[data-sg]');
+      if (!card) { zone.innerHTML = suggestionHTML(title, sub); return; }
+      const body = card.querySelector('[data-sg-body]');
+      const titleEl = card.querySelector('[data-sg-title]');
+      const subEl = card.querySelector('[data-sg-sub]');
+      if (!body || !titleEl || !subEl) return;
+      if (titleEl.textContent === title && subEl.textContent === sub) return; // nothing changed
+      clearTimeout(fadeTimer);
+      body.style.willChange = 'opacity';
+      body.style.transition = `opacity ${HALF}ms ${EASE}`;
+      body.style.opacity = '0';
+      fadeTimer = setTimeout(() => {
+        titleEl.textContent = title;
+        subEl.textContent = sub;
+        body.style.opacity = '1';
+        fadeTimer = setTimeout(() => { body.style.willChange = ''; body.style.transition = ''; }, HALF + 40);
+      }, HALF);
+    }
+
+    async function selectMood(id) {
+      if (pending === id) return;      // this exact tap is already in flight
+      pending = id;
+      const token = ++reqToken;
+      // ONE state commit for the tap: selection paints immediately and is
+      // never re-applied, so rapid switching can't stack animations.
+      state.selected = id;
+      paintSelection(id);
+      haptic(8);
+      let sg = null;
+      try {
+        // Parallel, not serial — flags used to add a second round trip before
+        // anything could be painted. Cached after the first call.
+        const [res] = await Promise.all([api.post('/app/moods', { mood: id }), getFlags()]);
+        sg = res.data.suggestion;
+      } catch (err) {
+        if (token === reqToken) handleApiError(err);
+      }
+      if (token !== reqToken) return;  // superseded by a newer mood — drop it
+      if (pending === id) pending = null;
+      if (!sg) return;
+      state.suggestion = sg;
+      paintSuggestion(sg);
+      beginBtn.disabled = false;       // opacity eases via .btn-primary transition
+    }
+
+    document.getElementById('back-btn').onclick = () => go('home');
+    cards.forEach((b) => { b.onclick = () => selectMood(b.dataset.mood); });
+    beginBtn.onclick = () => {
+      const sg = state.suggestion;
+      if (!sg) return;
+      const cycleSec = sg.inhale + sg.hold + sg.exhale;
+      startSession({ inhale: sg.inhale, hold: sg.hold, exhale: sg.exhale, cycles: Math.max(2, Math.round(sg.minutes * 60 / cycleSec)), name: sg.pattern.split(' ')[0], mood: state.selected });
+    };
   };
 
   // ================= 09 STATS / INSIGHTS =================

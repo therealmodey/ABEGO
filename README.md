@@ -98,6 +98,7 @@ npm run build                                              # vite build → dist
 npx wrangler d1 migrations apply webapp-production --local # apply schema
 npx wrangler d1 execute webapp-production --local --file=./seed.sql
 pm2 start ecosystem.config.cjs                             # wrangler pages dev on :3000
+npm test                                                   # mood-transition + visual-parity suites
 ```
 
 ## Deployment
@@ -193,6 +194,25 @@ Every interactive element in the Super Command Centre now performs a real action
 - Users: Invite (temp password via `POST /users/invite`), Impersonate (real JWT swap — return to `/admin` to restore), Add note, Full profile + Replay modals with real telemetry (`GET /users/:id`), 3-filters popover (status/role); detail panel shows real sessions/calm/LTV/timeline
 
 **Validation**: new jsdom suite `admin-interactions.js` (13 interaction round-trips incl. persist-verify via API) + 12-view suite + 4 regression suites — ALL PASS.
+
+## Mood-Transition Jitter Fix (2026-08-04)
+The Home-Screen mood check-in stuttered on every mood change. **Root cause: the screen re-rendered itself.** `routes.mood` held its state in closures and called `render()` → `root.innerHTML = ...` on every tap, so a single mood switch destroyed and rebuilt the entire screen. That fired four expensive things on one frame, right after a network round trip:
+
+1. **Replayed screen enter animation** — the new `.screen` re-ran `auraScreenIn` (420ms), sliding the whole screen 12px and rescaling `0.99→1`. This was the visible "jump".
+2. **Ambient-drift reset** — a brand-new `.aura-bg` restarted the 45s `auraAmbientDrift` keyframes, snapping the gradient back to `0% 0%`.
+3. **Glass re-rasterization** — 4 `backdrop-filter: blur(24px) saturate(160%)` mood cards + the 8-layer star field were re-created and re-blurred from scratch.
+4. **Suggestion card re-insert** — the card was re-added to the DOM, replaying its `auraSlideUp` from zero instead of updating in place.
+
+A fifth, subtler cause: the selected-card glow **could not interpolate**. Its shadow list was ordered `[outset, inset]` while the base `.glass` shadow is `[inset, outset]`. `box-shadow` only interpolates when the `inset` keyword matches at every position — mismatched lists swap discretely at the midpoint, so the glow *snapped* instead of easing.
+
+### What changed (motion/behaviour only — zero visual or layout change)
+- **Render-once screen**: the markup is built one time; mood changes now patch only what differs. The `<section>`, `.aura-bg`, `.aura-stars`, all four cards, `#suggestion-zone` and the CTA keep their DOM identity for the whole visit — no remount, no replayed animations, no re-blur.
+- **Interpolable glow**: the glow list is emitted as `[inset, outset]` (and `[inset, nil-inset, outset, nil-outset]` in light mode) so it positionally matches the active theme's `.glass` shadow and eases over 400ms. Inset and outset shadows paint strictly disjoint regions, so the reorder is pixel-neutral.
+- **Single-timeline copy crossfade**: switching mood fades the suggestion body out (190ms), swaps the text at the zero-opacity midpoint, then fades back in — so any reflow from a different line count happens while invisible. No flicker, no competing transitions.
+- **Non-layout properties only**: transitions are limited to `box-shadow`/`transform`/`opacity`; the card's `transition: all` was narrowed. No `height`/`width`/`margin`/`padding`/position is ever written.
+- **Controlled update timing**: one state commit per tap (selection paints instantly and is never re-applied), a `reqToken` guard so an out-of-order response can never overwrite a newer mood, `pending` de-dupes double taps, and the mood POST + flags fetch now run in **parallel** instead of adding a second serial round trip.
+
+**Validation**: `npm test` — 41 behaviour invariants (`tests/mood-transition.test.mjs`: DOM identity across 5 switches, exactly 1 POST per switch, banned-property audit, out-of-order race safety) + 13 visual-parity assertions (`tests/mood-visual-parity.test.mjs`: diffs the full style/text tree of the fixed screen against the original from `git HEAD`, unselected and selected). **54/54 pass** — the screen is visually identical, only smoother.
 
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
