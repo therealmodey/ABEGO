@@ -1906,6 +1906,17 @@
         </div>
       </div>
 
+      <div class="scc-card" style="margin-bottom:14px">
+        ${cardHead('Panel data', 'Restore admin-controlled values to their defaults')}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <div style="font-size:12px;color:var(--adm-text-2);line-height:1.6">
+            Restores AI tuning, notification rules and experiments to the baseline configuration.
+            <b style="color:var(--adm-text)">Users, sessions, payments and the audit log are never touched.</b>
+          </div>
+          <button class="scc-btn scc-btn--danger" id="scc-reset" style="flex-shrink:0">Reset panel data</button>
+        </div>
+      </div>
+
       <div class="scc-card" style="padding:0">
         <div style="padding:18px 20px 12px;border-bottom:1px solid var(--adm-border);display:flex;align-items:center;justify-content:space-between">
           <div>
@@ -1928,6 +1939,29 @@
           </div>`).join('') : '<p class="scc-empty">No audit entries yet — privileged actions will appear here.</p>'}
       </div>
     `);
+
+    // Panel data reset. Restores defaults server-side, drops every cached
+    // module so the next read serves the restored values, then re-renders so
+    // the admin sees the clean state immediately. Nothing is deleted and no
+    // control is left unbound — the API upserts a non-null default for every row.
+    const rstAll = document.getElementById('scc-reset');
+    if (rstAll) rstAll.onclick = async () => {
+      const ok = await confirmModal(
+        'Reset panel data?',
+        'AI tuning, notification rules and experiments return to their default configuration. Users, sessions, payments and the audit log are not affected.',
+        'Reset', true);
+      if (!ok) return;
+      rstAll.disabled = true;
+      try {
+        await api.post('/admin/reset');
+        Object.keys(sccCache).forEach((k) => delete sccCache[k]);
+        toast('Panel data restored to defaults', 'ok');
+        views.settings();
+      } catch (e) {
+        rstAll.disabled = false;
+        toast('Reset failed', 'warn');
+      }
+    };
   };
 
   /* ============ BOOT ============ */

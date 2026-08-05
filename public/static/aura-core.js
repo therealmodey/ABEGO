@@ -370,9 +370,25 @@
   }
 
   // ---------- Modal manager: scroll lock + animated open/close ----------
+  // `html` is the page scroll container, so the lock class goes on BOTH the
+  // documentElement and body. The CSS `:has()` rule covers modern engines; this
+  // mirrors it directly for older Safari/Firefox that lack :has() support.
+  // The scrollbar is zero-width in every state, so locking reclaims no space
+  // and cannot shift layout when a modal opens or closes.
   let openModals = 0;
-  function lockScroll() { if (++openModals === 1) document.body.classList.add('modal-open'); }
-  function unlockScroll() { if (--openModals <= 0) { openModals = 0; document.body.classList.remove('modal-open'); } }
+  function lockScroll() {
+    if (++openModals === 1) {
+      document.body.classList.add('modal-open');
+      document.documentElement.classList.add('modal-open');
+    }
+  }
+  function unlockScroll() {
+    if (--openModals <= 0) {
+      openModals = 0;
+      document.body.classList.remove('modal-open');
+      document.documentElement.classList.remove('modal-open');
+    }
+  }
 
   // openModal(className, html) -> { veil, close(cb) }
   // close() plays the reverse animation, unlocks scroll, then removes.

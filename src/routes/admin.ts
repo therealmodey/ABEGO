@@ -5,7 +5,7 @@ import {
   logAudit, clientIp, cacheGet, cacheSet, cacheDel, jwtSecret,
 } from '../lib/middleware'
 import { signJwt, hashPassword } from '../lib/auth'
-import { getAiConfig } from '../lib/aiconfig'
+import { getAiConfig, AI_DEFAULTS } from '../lib/aiconfig'
 
 const admin = new Hono<AppEnv>()
 admin.use('*', requireAuth)
@@ -620,6 +620,89 @@ admin.get('/users/:id', async (c) => {
     user, subscription: sub || null, sessionSummary: sessions,
     recentSessions: recentSessions.results, moods: moods.results,
     payments, notes: notes.results, liveSession: liveSession || null,
+  })
+})
+
+// ---------- Admin panel data reset: restore the clean default state ----------
+// Restores every ADMIN-CONTROLLED value to the documented baseline from
+// migration 0003. This is a RESTORE, not a wipe:
+//   - No table is dropped and no schema changes.
+//   - No user, session, mood, subscription or payment data is touched.
+//   - Every row is re-seeded with a non-null default, so no control can end up
+//     bound to an undefined/null value (upsert, never delete-only).
+//   - The audit log is intentionally preserved: it is declared immutable in the
+//     Settings view, and erasing it would break that contract.
+// The result is a panel that looks and behaves exactly as a fresh install.
+const RESET_NOTIFICATION_RULES: Array<[number, string, string, string, number, number, number]> = [
+  [1, 'Evening unwind',     'stress > 0.7 · 7-10pm',         'Your evening wind-down is ready. 5 minutes to a calmer night.', 82400, 48, 1],
+  [2, 'Sleep prep',         'pre-sleep window · no session', 'Twilight Descent is queued for tonight.',                       41800, 52, 1],
+  [3, 'Morning intent',     'wake window · streak > 3',      'Set your intention. Start today grounded.',                     24600, 38, 1],
+  [4, 'Streak protect',     'streak at risk · 8pm',          'Keep your streak alive — one short session before bed.',        12100, 61, 1],
+  [5, 'Weekly insight',     'sunday 6pm',                    'Your week in breaths — see your progress.',                      9400, 44, 1],
+  [6, 'Program suggestion', 'AI match > 0.8',                'A journey matched to your pattern is ready.',                    7200, 42, 1],
+  [7, 'Comeback',           'inactive 7d',                   'Your calm is waiting. Pick up where you left off.',              5800, 18, 0],
+  [8, 'Premium teaser',     'free · 10+ sessions',           'Unlock every journey with AURA Plus.',                           4100, 22, 0],
+]
+
+const RESET_EXPERIMENTS: Array<[string, string, number, string, number, number, string, number, string | null]> = [
+  ['exp_041', 'Onboarding: 1 breath before signup', 6,  'Running',  2, 8420,  '+3.1%',  62, null],
+  ['exp_040', 'Evening push copy v3',               9,  'Running',  3, 14100, '+6.8%',  88, null],
+  ['exp_039', 'AI aggression 0.7 vs 0.5',           21, 'Winning',  2, 20180, '+12.6%', 99, null],
+  ['exp_038', 'Paywall after 5th session',          14, 'Winning',  2, 11300, '+9.2%',  96, null],
+  ['exp_037', 'Haptic intensity curve',             4,  'Paused',   2, 3900,  '−0.4%',  22, null],
+  ['exp_036', 'Sleep story narrator B',             30, 'Complete', 2, 18240, '+4.4%',  94, 'B'],
+]
+
+admin.post('/reset', async (c) => {
+  const me = c.get('user')
+  const db = c.env.DB
+
+  // 1. AI engine config -> published baseline (read live by the user app).
+  await db.prepare(
+    "INSERT INTO app_config (key, value, updated_at, updated_by) VALUES ('ai_config', ?, datetime('now'), ?) " +
+    'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by'
+  ).bind(JSON.stringify(AI_DEFAULTS), me.sub).run()
+
+  // 2. Notification rules -> the 8 baseline rules, every column non-null.
+  //    Upsert by id so any rule the admin renamed/toggled/created is corrected:
+  //    ids 1-8 are restored in place, and rows added beyond the baseline are
+  //    removed so the list matches a fresh install exactly.
+  for (const [id, name, trigger, body, sent, open_rate, enabled] of RESET_NOTIFICATION_RULES) {
+    await db.prepare(
+      'INSERT INTO notification_rules (id, name, trigger, body, sent, open_rate, enabled) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(id) DO UPDATE SET name = excluded.name, trigger = excluded.trigger, body = excluded.body, ' +
+      'sent = excluded.sent, open_rate = excluded.open_rate, enabled = excluded.enabled'
+    ).bind(id, name, trigger, body, sent, open_rate, enabled).run()
+  }
+  await db.prepare('DELETE FROM notification_rules WHERE id > ?').bind(RESET_NOTIFICATION_RULES.length).run()
+
+  // 3. Experiments -> the 6 baseline experiments (exp_039 is the featured one).
+  for (const [id, name, days, status, variants, users, lift, conf, winner] of RESET_EXPERIMENTS) {
+    await db.prepare(
+      'INSERT INTO experiments (id, name, days, status, variants, users, lift, conf, winner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(id) DO UPDATE SET name = excluded.name, days = excluded.days, status = excluded.status, ' +
+      'variants = excluded.variants, users = excluded.users, lift = excluded.lift, conf = excluded.conf, winner = excluded.winner'
+    ).bind(id, name, days, status, variants, users, lift, conf, winner).run()
+  }
+  const keepIds = RESET_EXPERIMENTS.map((e) => e[0])
+  await db.prepare(
+    `DELETE FROM experiments WHERE id NOT IN (${keepIds.map(() => '?').join(',')})`
+  ).bind(...keepIds).run()
+
+  // Drop cached config so the very next read serves the restored values.
+  cacheDel('ai_config')
+  await logAudit(c.env.DB, me.sub, 'admin_panel_reset', 'app_config', 0, {
+    ai_config: 'defaults', notification_rules: RESET_NOTIFICATION_RULES.length, experiments: RESET_EXPERIMENTS.length,
+  }, clientIp(c))
+
+  return c.json({
+    ok: true,
+    reset: {
+      ai_config: AI_DEFAULTS,
+      notification_rules: RESET_NOTIFICATION_RULES.length,
+      experiments: RESET_EXPERIMENTS.length,
+    },
+    preserved: ['users', 'sessions', 'moods', 'subscriptions', 'payments', 'audit_logs'],
   })
 })
 
