@@ -211,7 +211,7 @@
       <div style="flex:1;display:flex;align-items:center;justify-content:center">${orbHTML(240, 'idle')}</div>
       <div style="text-align:center;padding-bottom:32px">
         <h1 style="font-size:32px;font-weight:600;letter-spacing:-0.5px;line-height:1.25;margin-bottom:14px">Breathe with<br/>intention.</h1>
-        <p style="font-size:15px;color:var(--ink-55);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath — calmer in seconds, clearer in minutes.</p>
+        <p style="font-size:15px;color:var(--ink-55);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath. Calmer in seconds, clearer in minutes.</p>
         <button class="btn-primary" id="begin-btn">Begin</button>
         <button style="margin-top:18px;font-size:14px;color:var(--text-tertiary)" id="login-link">I already have an account</button>
         <nav style="display:flex;gap:8px;justify-content:center;margin-top:28px" aria-label="Onboarding progress">
@@ -903,7 +903,7 @@
       root.innerHTML = `${bgHTML('deep')}
       <section class="screen" style="padding:24px;align-items:center;justify-content:center;text-align:center">
         <div style="opacity:0.85">${orbHTML(200, 'idle')}</div>
-        <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin:36px 0 12px">No data yet —<br/>just you and the orb.</h1>
+        <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin:36px 0 12px">No data yet.<br/>Just you and the orb.</h1>
         <p style="font-size:14px;color:var(--text-tertiary);max-width:300px;line-height:1.55;margin-bottom:34px">Your first session will unlock insights, trends, and gentle nudges tuned to you.</p>
         <div style="width:100%;max-width:340px">
           <button class="btn-primary" id="first-btn" style="margin-bottom:12px">Start first session</button>
@@ -1399,7 +1399,7 @@
     document.getElementById('profile-card').onclick = () => go('profile');
     document.querySelectorAll('[data-pref]').forEach((t) => t.onclick = () => {
       const k = t.dataset.pref;
-      if (k === 'adaptive' && u.plan === 'free') return upgradeModal('Adaptive pacing learns your rhythm and adjusts each session — part of AURA Pro.');
+      if (k === 'adaptive' && u.plan === 'free') return upgradeModal('Adaptive pacing learns your rhythm and adjusts each session. It comes with AURA Pro.');
       t.classList.toggle('on');
       t.setAttribute('aria-checked', t.classList.contains('on'));
       save({ [k]: !prefs[k] });

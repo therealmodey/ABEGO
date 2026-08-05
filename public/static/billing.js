@@ -17,7 +17,7 @@
 
     const params = new URLSearchParams(location.search);
     if (params.get('status') === 'success') {
-      toast('Payment received — welcome to AURA Plus ✦');
+      toast('Payment received. Welcome to AURA Plus ✦');
       history.replaceState({}, '', '/billing');
     }
   }

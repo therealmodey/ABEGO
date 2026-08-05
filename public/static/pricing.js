@@ -13,9 +13,9 @@
   };
 
   const FAQ = [
-    ['Can I cancel anytime?', 'Yes. Cancel in one tap from your billing page — you keep access until the end of your billing period, then move to the Free plan. No questions, no retention flows.'],
+    ['Can I cancel anytime?', 'Yes. Cancel in one tap from your billing page. You keep access until the end of your billing period, then move to the Free plan. No questions, no retention flows.'],
     ['What payment methods do you support?', 'We support all major cards via Stripe worldwide, and Paystack for cards, bank transfer, and USSD in Nigeria. All payments are encrypted and PCI-compliant.'],
-    ['What happens when I hit the free limit?', 'The Free plan includes 3 sessions per day. When you reach it, the orb rests until tomorrow — or upgrade for unlimited practice.'],
+    ['What happens when I hit the free limit?', 'The Free plan includes 3 sessions per day. When you reach it, the orb rests until tomorrow, or upgrade for unlimited practice.'],
     ['Is there a free trial for paid plans?', 'Yearly plans include a 7-day free trial. You can cancel during the trial and pay nothing.'],
     ['Do you offer refunds?', "If AURA isn't right for you, contact us within 14 days of purchase for a full refund."],
   ];
@@ -44,7 +44,7 @@
       <section id="pricing-hero" style="text-align:center;padding:56px 0 40px">
         <div style="display:flex;justify-content:center;margin-bottom:28px">${orbHTML(120, 'hold', { intensity: 0.85 })}</div>
         <h1 style="font-size:clamp(30px,5vw,44px);font-weight:600;letter-spacing:-1px;margin-bottom:14px">Simple, Transparent Pricing</h1>
-        <p style="font-size:16px;color:var(--text-tertiary);max-width:460px;margin:0 auto 34px;line-height:1.6">Start free. Upgrade when your practice deepens. Every plan keeps the orb — paid plans make it smarter.</p>
+        <p style="font-size:16px;color:var(--text-tertiary);max-width:460px;margin:0 auto 34px;line-height:1.6">Start free. Upgrade when your practice deepens. Every plan keeps the orb. Paid plans make it smarter.</p>
         <div class="billing-toggle" role="tablist">
           <button role="tab" class="${cycle === 'monthly' ? 'active' : ''}" data-cycle="monthly">Monthly</button>
           <button role="tab" class="${cycle === 'yearly' ? 'active' : ''}" data-cycle="yearly">Yearly <span style="font-size:11px;opacity:0.9">· save 40%</span></button>
@@ -71,7 +71,7 @@
       </section>
 
       <section id="trust-signals" style="display:flex;flex-wrap:wrap;justify-content:center;gap:28px;padding:40px 0;color:var(--text-tertiary);font-size:13px">
-        <span style="display:flex;align-items:center;gap:8px">${icon('shield', 16)} Secure payments — Stripe & Paystack</span>
+        <span style="display:flex;align-items:center;gap:8px">${icon('shield', 16)} Secure payments with Stripe & Paystack</span>
         <span style="display:flex;align-items:center;gap:8px">${icon('check', 16)} Cancel anytime, keep your data</span>
         <span style="display:flex;align-items:center;gap:8px">${icon('heart', 16)} 7-day free trial on yearly plans</span>
       </section>
@@ -128,7 +128,7 @@
         <h3 style="font-size:19px;font-weight:600;margin-bottom:6px">Choose payment method</h3>
         <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:22px">AURA ${planId === 'pro' ? 'Pro' : 'Premium'} · billed ${cycle}</p>
         <button class="btn-primary" data-p="stripe" style="margin-bottom:12px">${icon('card', 18)} Pay with card (Stripe)</button>
-        <button class="btn-ghost" data-p="paystack" style="margin-bottom:14px">🇳🇬 Paystack — cards, transfer, USSD</button>
+        <button class="btn-ghost" data-p="paystack" style="margin-bottom:14px">🇳🇬 Paystack · cards, transfer, USSD</button>
         <button style="width:100%;font-size:13px;color:var(--text-tertiary)" data-x>Cancel</button>
       </div>`;
     document.body.appendChild(veil);

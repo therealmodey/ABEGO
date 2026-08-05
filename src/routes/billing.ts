@@ -130,7 +130,7 @@ async function simulateCheckout(c: any, userId: number, plan: string, cycle: str
   }
   await activatePlan(c.env.DB, userId, plan as 'pro' | 'premium', cycle as 'monthly' | 'yearly', provider as 'stripe' | 'paystack', `sim_${Date.now()}`, amount, currency)
   await logActivity(c.env.DB, userId, 'plan_activated_simulated', { plan, cycle, provider }, clientIp(c))
-  return c.json({ simulated: true, activated: true, plan, cycle, provider, message: `${provider} keys not configured — plan activated in sandbox mode.` })
+  return c.json({ simulated: true, activated: true, plan, cycle, provider, message: `${provider} keys not configured, so the plan was activated in sandbox mode.` })
 }
 
 export async function activatePlan(
