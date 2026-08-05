@@ -32,19 +32,45 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* ---------- Stable viewport reference (single source of truth) ----------
+   --vh-fixed is THE layout height every full-screen container measures against.
+   It resolves, in order of preference:
+     1. 100svh  — the SMALL viewport height. Unlike 100dvh this is a constant:
+        it is the height with the mobile browser's URL bar EXPANDED, and it does
+        NOT change while the bar collapses during scroll. `dvh` was the previous
+        value and is precisely why the layout resized mid-scroll on phones.
+     2. 100vh   — fallback for engines without svh (older Safari/Firefox).
+   Declared once here so no screen can drift to a different height basis.     */
+:root { --vh-fixed: 100vh; }
+@supports (height: 100svh) { :root { --vh-fixed: 100svh; } }
+
 html, body { height: 100%; }
+html {
+  /* Lock the horizontal axis to the viewport so nothing can widen the page and
+     introduce a horizontal scrollbar (which would itself shift layout). */
+  width: 100%;
+  overflow-x: hidden;
+  /* The page scroll container is ALWAYS html, and it is always scrollable, so
+     the document never toggles between "has a scroll container" and "doesn't"
+     when navigating from a fixed-height screen to a scrolling one. Combined
+     with the zero-width scrollbar above this reserves no pixels at all. */
+  overflow-y: scroll;
+}
 body {
   font-family: var(--font);
   background: var(--bg-primary);
   color: var(--text-primary);
-  overflow-x: hidden;
+  width: 100%;
+  /* body must NOT declare its own overflow: that would make it a second scroll
+     container competing with html and reintroduce inconsistent sizing. */
   -webkit-font-smoothing: antialiased;
 }
 button { font-family: var(--font); cursor: pointer; border: none; background: none; color: inherit; }
 input, select { font-family: var(--font); }
 a { color: inherit; text-decoration: none; }
 
-.app-root { position: relative; min-height: 100vh; min-height: 100dvh; }
+.app-root { position: relative; min-height: var(--vh-fixed); width: 100%; }
 
 /* ============ Ambient background ============ */
 .aura-bg {
@@ -113,7 +139,7 @@ a { color: inherit; text-decoration: none; }
 @keyframes auraShimmerSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
 
 /* ============ Boot loader ============ */
-.boot-loader { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.boot-loader { display: flex; align-items: center; justify-content: center; min-height: var(--vh-fixed); }
 .boot-orb {
   width: 120px; height: 120px; border-radius: 50%;
   background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, #7C3AED 30%, #22D3EE 65%, #1a0f3a 100%);
@@ -287,8 +313,12 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
 /* ============ Screen container (mobile-first, centers on desktop) ============ */
 .screen {
   position: relative; z-index: 1;
+  /* Identical bounding box on EVERY screen: same max-width, same centring,
+     same height basis. Nothing here is content-derived, so no page can
+     compute a different container size from another. */
+  width: 100%;
   max-width: 480px; margin: 0 auto;
-  min-height: 100vh; min-height: 100dvh;
+  min-height: var(--vh-fixed);
   display: flex; flex-direction: column;
   animation: auraFadeIn var(--dur-slow) var(--ease);
 }
@@ -406,9 +436,24 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
 .shimmer-track { position: relative; width: 200px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; }
 .shimmer-track::after { content: ''; position: absolute; top: 0; left: 0; width: 40%; height: 100%; border-radius: 2px; background: linear-gradient(90deg, transparent, rgba(167,139,250,0.9), transparent); animation: auraShimmerSlide 1.6s ease-in-out infinite; }
 .hidden { display: none !important; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
+/* ---------- Invisible scrollbars (scroll fully preserved) ----------
+   The scrollbar is hidden EVERYWHERE, on every scrollable element, so it can
+   never occupy layout width and therefore can never cause a width shift when
+   it appears or disappears between screens. Scrolling itself is untouched:
+   no `overflow: hidden`, no `touch-action` change, no height clamp — only the
+   scrollbar's own rendering is suppressed.
+
+   Three engines, three mechanisms, all required for full coverage:
+     - WebKit/Blink (Safari, Chrome, Edge): zero-size ::-webkit-scrollbar
+     - Firefox: scrollbar-width: none
+     - legacy Edge/IE: -ms-overflow-style: none                              */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* The pseudo-elements are zeroed too — some WebKit builds still reserve the
+   track's own box even when the scrollbar box itself is zero-width. */
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner { background: transparent; width: 0; height: 0; }
 
 /* ================================================================
    PREMIUM INTERACTION LAYER — motion, viewport-fit, slider, modal
@@ -423,6 +468,12 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
 }
 html { scroll-behavior: smooth; }
 body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+/* Modal scroll-lock. `html` is the page scroll container, so the lock must be
+   applied there for it to take effect. Because the scrollbar is zero-width in
+   every state, switching to `hidden` reclaims no space and therefore causes no
+   width shift when a modal opens or closes (the classic modal jump). */
+html.modal-open { overflow: hidden; }
+html:has(body.modal-open) { overflow: hidden; }
 body.modal-open { overflow: hidden; touch-action: none; }
 
 /* Screen enter/leave crossfade: fade + 12px vertical rise */
@@ -441,18 +492,24 @@ body.modal-open { overflow: hidden; touch-action: none; }
 }
 .screen--leaving { animation: auraScreenOut 240ms var(--ease) both; pointer-events: none; }
 
-/* ---------- Viewport-perfect layout ---------- */
+/* ---------- Viewport-perfect layout ----------
+   Every screen resolves to the SAME fixed height reference (--vh-fixed) and
+   the SAME width box. Fixed-height screens simply cannot overflow; scrolling
+   screens grow downward from the identical minimum. Because the two variants
+   now share one height basis and one width, navigating between them cannot
+   change the container's bounding box. */
 .screen {
-  height: 100vh; height: 100dvh;
+  height: var(--vh-fixed);
   min-height: 0;
   overflow: hidden;
 }
-/* screens that legitimately need scroll (lists, admin, pricing) opt out */
+/* screens that legitimately need scroll (lists, admin, pricing) opt out of the
+   height clamp only — width, centring and the minimum height are unchanged. */
 .screen--scroll {
-  height: auto; min-height: 100vh; min-height: 100dvh;
+  height: auto; min-height: var(--vh-fixed);
   overflow: visible;
 }
-.screen--wide { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+.screen--wide { height: auto; min-height: var(--vh-fixed); overflow: visible; }
 
 /* CTA anchored to bottom safe area */
 .cta-anchor { padding-bottom: calc(24px + var(--safe-bottom)); margin-top: auto; }
@@ -522,7 +579,9 @@ input[type="range"].aura-slider.dragging::-moz-range-thumb { transform: scale(1.
 @keyframes auraVeilOut { from { opacity: 1; } to { opacity: 0; } }
 
 .sheet {
-  max-height: 90vh; max-height: 90dvh;
+  /* Sheet height is derived from the same stable reference, so an open sheet
+     cannot resize when the mobile URL bar collapses behind it. */
+  max-height: calc(var(--vh-fixed) * 0.9);
   overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: calc(40px + var(--safe-bottom));
@@ -811,7 +870,7 @@ html[data-theme="light"] {
 
 /* ---- Shell + ambient background ---- */
 body#aura-admin { background: var(--adm-bg); }
-.scc { display: flex; min-height: 100dvh; position: relative; z-index: 1; color: var(--adm-text); }
+.scc { display: flex; min-height: var(--vh-fixed); position: relative; z-index: 1; color: var(--adm-text); }
 .scc-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
     radial-gradient(50% 40% at 12% 8%, rgba(124,58,237,0.18), transparent 70%),
@@ -837,7 +896,7 @@ html[data-theme="light"] .scc-bg::after { background-image:
 .scc-side { width: 240px; flex-shrink: 0; display: flex; flex-direction: column;
   border-right: 1px solid var(--adm-border); background: var(--adm-side-bg);
   backdrop-filter: blur(30px) saturate(160%); -webkit-backdrop-filter: blur(30px) saturate(160%);
-  position: sticky; top: 0; height: 100dvh; z-index: 2; }
+  position: sticky; top: 0; height: var(--vh-fixed); z-index: 2; }
 .scc-brand { padding: 20px; display: flex; align-items: center; gap: 10px; }
 .scc-mark { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
   background: radial-gradient(circle at 30% 25%, rgba(255,255,255,0.6), #22D3EE 25%, #7C3AED 70%, #4C1D95 100%);

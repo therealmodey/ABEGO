@@ -99,7 +99,13 @@
     const renderNext = () => {
       if (token !== navToken) return; // superseded by a newer navigation
       (routes[h] || routes.welcome)();
-      window.scrollTo(0, 0);
+      // Jump to the top INSTANTLY. `html { scroll-behavior: smooth }` would
+      // otherwise animate this reset, so the incoming screen would visibly
+      // slide upward while it fades in — read as a layout jump on navigation.
+      // `behavior: 'instant'` overrides the stylesheet for this one call only;
+      // in-page smooth anchor scrolling elsewhere is unaffected.
+      try { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); }
+      catch (e) { window.scrollTo(0, 0); }
     };
     if (leaving && !leaving.classList.contains('screen--leaving')) {
       leaving.classList.add('screen--leaving');

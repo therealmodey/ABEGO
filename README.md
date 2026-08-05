@@ -239,6 +239,40 @@ The Home fix's root cause — a route holding state in a closure and calling `ro
 
 **Validation**: `npm test` — **151/151 pass**. The 54 existing mood assertions confirm the Home fix is not rebroken, plus 97 new assertions in `tests/motion-global.test.mjs`: orb interpolation (≥12 distinct intermediate colours, monotonic channel progression, ease-in-out curve verification, interrupt continuity, exactly one live rAF timeline), ring centring (offset-free, geometry and style provably unchanged across the whole countdown), Library (node identity across 6 filter switches, one network call, opacity-only crossfade, zero layout mutation), and a global stylesheet audit that fails on any `transition: all` or uncontained layout-property transition.
 
+## Layout Stability, Invisible Scrollbar & Admin Reset (2026-08-05)
+Three defects fixed. **No design, spacing, layout structure or component hierarchy changed; scrolling is never disabled and no feature was removed.**
+
+### 1. The scrollbar was the layout shift
+`.screen` was `height: 100dvh; overflow: hidden` (no page scrollbar) while `.screen--scroll` — used by Library, Settings and 8 other routes — was `height: auto` (page scrollbar **appears**). With `::-webkit-scrollbar { width: 8px }` and a `max-width: 480px; margin: 0 auto` centred container, every navigation between a fixed screen and a scrolling one changed the viewport width by 8–15px and **moved the whole app sideways by half that**, then moved it back. That is the reported shift.
+
+- **Scrollbar is now invisible everywhere**, across all three engines: `::-webkit-scrollbar { width: 0; height: 0; display: none }` (Safari/Chrome/Edge), `scrollbar-width: none` (Firefox), `-ms-overflow-style: none` (legacy Edge). Applied universally via `*` so nested scroll containers are covered too, not just the page.
+- **Scrolling is completely untouched** — no `overflow: hidden`, no `touch-action` change, no height clamp. Only the scrollbar's *rendering* is suppressed.
+- **`html` is now permanently `overflow-y: scroll`**, so the document never toggles between "has a scroll container" and "doesn't". Because the bar is zero-width this reserves **no pixels**, which is what makes the toggle free.
+- **`100vw` is banned** (it ignores the scrollbar and overflows), and `html`/`body` lock the horizontal axis so a surprise h-scrollbar can't appear.
+- **Modal open/close no longer jumps** either: the scroll lock moved to `html` (the real scroll container) and, since the bar is always zero-width, locking reclaims no space.
+
+### 2. `dvh` was resizing the layout on every phone
+Every full-height container used `100dvh` — the **dynamic** viewport height, which by definition *changes as the mobile URL bar collapses and expands during scroll*. The layout was therefore resizing mid-scroll on every phone, by design of the unit.
+
+A single token is now the one height reference for the whole app:
+```css
+:root { --vh-fixed: 100vh; }                                  /* fallback */
+@supports (height: 100svh) { :root { --vh-fixed: 100svh; } }  /* stable    */
+```
+`100svh` is the **small** viewport height — a constant that does not change when the URL bar moves. `.app-root`, `.screen`, `.screen--scroll`, `.screen--wide`, `.boot-loader`, `.sheet` and the admin shell all measure against it, so no screen can drift to a different height basis. `.screen--scroll` now overrides **only** height and overflow — never width, max-width or margin — so the scrolling and fixed variants share one bounding box.
+
+### 3. Navigation made the incoming screen slide
+`html { scroll-behavior: smooth }` applies to programmatic scrolling too, so the router's `window.scrollTo(0, 0)` was **animating** — the new screen visibly slid upward while fading in. It now uses `behavior: 'instant'` (with a legacy fallback); smooth anchor scrolling elsewhere is unaffected. Screen transitions already used only `opacity`/`transform`, and a parser-backed audit now proves **no keyframe anywhere animates a layout property**.
+
+### 4. Admin panel data reset
+New `POST /api/admin/reset` (behind the existing `requireAuth` + `requireAdmin` guards) plus a **Reset panel data** control in Settings, built from existing components (`scc-card`, `scc-btn--danger`, `confirmModal`).
+
+- **Restores, never wipes**: AI tuning → `AI_DEFAULTS`, the 8 baseline notification rules, and the 6 baseline experiments — all via `ON CONFLICT DO UPDATE` upserts, so **every control is rebound to a non-null default** and no undefined state can survive.
+- **User data is never touched**: `users`, `sessions`, `moods`, `subscriptions`, `payments`, `profiles` and the (contractually immutable) `audit_log` are all preserved; the response echoes the preserved list. The only deletes remove rules/experiments added *beyond* the baseline.
+- **Functionality intact**: the cache is invalidated so the next read serves restored values, the view re-renders, the button re-enables on failure, and the pre-existing per-module AI reset still works.
+
+**Validation**: `npm test` → **242/242 pass** (41 + 13 + 97 existing, plus 91 new in `tests/layout-stability.test.mjs`). The new suite parses the stylesheet rule-by-rule rather than grepping, so a rule that merely *mentions* a property cannot satisfy a check. It asserts cross-browser scrollbar hiding, that scroll is never disabled, that every full-height container uses `--vh-fixed`, that no `dvh`/`100vw` remains, that `.screen--scroll` never overrides width, that no keyframe animates layout, and 30+ admin-reset safety invariants. The reset was additionally verified **live against D1**: mutate → reset → confirm defaults restored, zero nulls, user count unchanged, second reset idempotent, and writes still working afterwards.
+
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
 - Email notifications (receipts, dunning) and password reset
