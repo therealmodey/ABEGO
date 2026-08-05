@@ -32,7 +32,7 @@ Regular users sign up through the app at `/`.
 
 ## Currently Completed Features
 ### Core product
-- Signup / login / logout / me — PBKDF2 (100k iters) + HS256 JWT (Web Crypto only, Workers-safe), httpOnly cookie + Bearer
+- Signup / login / logout / me — PBKDF2 (100k iters) + HS256 JWT (Web Crypto only, Workers-safe), httpOnly cookie + Bearer; logout revokes the token server-side
 - 18-screen SPA replicating the design: splash → welcome → auth → onboarding (how-it-works, personalize, permissions) → home with liquid orb → session engine (inhale/hold/exhale state machine, pause veil, completion stats) → mood check-in → stats → programs → session setup sheet → history → profile → settings
 - Breathing session engine: 1s tick, phase-colored orb morphing, progress ring, cycle tracking
 - Mood check-ins with rule-based AI: anxious→4-7-8, calm→box, tired→6-2-4 energizing, focused→coherent 5-0-5, with evening pace adaptation
@@ -41,17 +41,17 @@ Regular users sign up through the app at `/`.
 
 ### Admin access system (Part 2)
 - RBAC `user`/`admin`; role re-validated from DB on **every** request (JWT never trusted alone)
-- Seeded initial admin; signup role hard-coded to `user` (no self-promotion possible)
+- First admin created via `scripts/bootstrap-admin.mjs` (never seeded, no committed credentials); signup role hard-coded to `user` (no self-promotion possible)
 - Admin console at `/admin`: Dashboard (KPIs, plan distribution, 14-day signup chart), Users (search, paginate, promote/demote/suspend/reactivate/delete with confirmation modals), Analytics, Content (program toggles), Audit logs
-- Safety rails: can't change own role, can't demote last admin, admins can't be suspended/deleted, soft-delete with email mangling
+- Safety rails: can't change own role, can't demote last admin, admins can't be suspended/deleted, soft-delete with email mangling; role change / suspend / delete invalidate the target's sessions immediately
 - Every admin action audited (action, target, detail JSON, IP); user activity logged
 - Rate limiting: signup 10/5min, login 15/5min, checkout 10/min, admin surface 120/min
 
 ### Monetization (Part 3)
 - Freemium tiers: **Free** (3 sessions/day, beginner programs) · **Pro** $9.99/mo or $71.88/yr · **Premium** $19.99/mo or $143.88/yr (yearly = 40% off)
 - Stripe Checkout (global, USD) + Paystack (Nigeria, NGN @ ₦1600 rate) via raw REST — no SDKs
-- Webhooks with signature verification: Stripe HMAC-SHA256, Paystack HMAC-SHA512
-- **Sandbox simulation**: when API keys are absent, checkout instantly activates the plan so the whole flow is testable
+- Webhooks with **mandatory** signature verification: Stripe HMAC-SHA256 (+ 300s timestamp window), Paystack HMAC-SHA512, replay-protected via `webhook_events`; 503 until the signing secret is configured
+- **Sandbox simulation**: with no payment keys, checkout returns `503 payments_unavailable` unless `ALLOW_SIM_CHECKOUT="1"` is set, which activates the plan instantly so the flow stays testable (never set it in production — it grants paid plans for free)
 - Server-side feature gating: daily usage metering (`usage_counters`), premium program locks, Pro-only deep analytics — all return HTTP 402 → frontend upgrade modal
 - High-conversion `/pricing`: hero, monthly/yearly toggle, "✦ MOST POPULAR" Pro card, provider picker (Stripe / 🇳🇬 Paystack), trust signals, comparison table, FAQ accordion
 - `/billing` dashboard: current plan, renew/end dates, upgrade & cancel (with confirmation), payment history
@@ -59,14 +59,14 @@ Regular users sign up through the app at `/`.
 ### Performance
 - In-memory per-isolate TTL cache: programs 300s, user stats 60s, admin analytics 30s (invalidated on writes)
 - 14 covering DB indexes on hot paths (sessions by user+time, active subscriptions, payments by provider ref, etc.)
-- Single 58 KB worker bundle; CDN-only frontend deps (axios); system-font-fallback Inter
+- Single ~88 KB worker bundle; CDN-only frontend deps (axios); system-font-fallback Inter
 
 ## Functional API Surface
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/auth/signup` | — | rate-limited, creates profile + free sub |
 | POST | `/api/auth/login` | — | 403 if suspended |
-| POST | `/api/auth/logout` · GET `/api/auth/me` | user | |
+| POST | `/api/auth/logout` · GET `/api/auth/me` | user | logout revokes that token's `jti` |
 | PUT | `/api/app/profile` | user | onboarding prefs |
 | GET | `/api/app/programs` | user | cached, `locked` flags |
 | POST | `/api/app/sessions/start` | user | 402 on free daily limit / premium program |
@@ -78,7 +78,7 @@ Regular users sign up through the app at `/`.
 | GET | `/api/billing/me` | user | sub + payment history |
 | POST | `/api/billing/checkout` | user | `{plan, cycle, provider}` → checkout URL or simulated activation |
 | POST | `/api/billing/cancel` | user | reverts to free |
-| POST | `/api/billing/webhooks/stripe` · `/paystack` | signature | |
+| POST | `/api/billing/webhooks/stripe` · `/paystack` | signature | verified + deduped; 503 if unconfigured |
 | GET | `/api/admin/users` | admin | search + pagination |
 | PUT | `/api/admin/users/:id/role` · `/status` | admin | audited, safety rails |
 | DELETE | `/api/admin/users/:id` | admin | soft delete |
@@ -88,7 +88,7 @@ Regular users sign up through the app at `/`.
 
 ## Data Architecture
 - **Storage**: Cloudflare D1 (SQLite) — binding `DB`, database `webapp-production` (local dev via `--local`)
-- **Tables**: `users`, `profiles`, `programs`, `sessions`, `moods`, `subscriptions`, `payments`, `usage_counters`, `activity_logs`, `audit_logs`
+- **Tables**: `users` (incl. `token_version`), `profiles`, `programs`, `sessions`, `moods`, `subscriptions`, `payments`, `usage_counters`, `activity_logs`, `audit_logs`, `app_config`, `notification_rules`, `experiments`, `admin_notes`, `webhook_events`, `revoked_tokens`
 - **Indexes**: 14 covering indexes (see `migrations/0001_initial_schema.sql`)
 - **Data flow**: SPA (axios + Bearer JWT) → Hono API → D1; hot reads served from in-isolate TTL cache
 
@@ -284,14 +284,53 @@ New `POST /api/admin/reset` (behind the existing `requireAuth` + `requireAdmin` 
 
 **Validation**: `npm test` → **242/242 pass** (41 + 13 + 97 existing, plus 91 new in `tests/layout-stability.test.mjs`). The new suite parses the stylesheet rule-by-rule rather than grepping, so a rule that merely *mentions* a property cannot satisfy a check. It asserts cross-browser scrollbar hiding, that scroll is never disabled, that every full-height container uses `--vh-fixed`, that no `dvh`/`100vw` remains, that `.screen--scroll` never overrides width, that no keyframe animates layout, and 30+ admin-reset safety invariants. The reset was additionally verified **live against D1**: mutate → reset → confirm defaults restored, zero nulls, user count unchanged, second reset idempotent, and writes still working afterwards.
 
+## Security Hardening (2026-08-05)
+Two review-driven passes (PRs #4 and #5). **No screen, copy or layout changed** — the
+frontend is byte-identical; all four UI suites still pass.
+
+### Environment / bindings
+| Variable | Required | Effect if unset |
+|---|---|---|
+| `JWT_SECRET` | **yes**, ≥ 32 chars | app fails closed — auth returns 500 instead of signing tokens with a guessable fallback |
+| `STRIPE_WEBHOOK_SECRET` | for Stripe | `/webhooks/stripe` returns `503 webhooks_unconfigured` |
+| `PAYSTACK_WEBHOOK_SECRET` (or `PAYSTACK_SECRET_KEY`) | for Paystack | `/webhooks/paystack` returns 503 |
+| `ALLOWED_ORIGINS` | no | no cross-origin API access at all (correct default — app and API share an origin) |
+| `ALLOW_SIM_CHECKOUT` | no | checkout returns `503 payments_unavailable` without payment keys. Set to `"1"` **only** in dev/test — it grants paid plans for free. Deliberately absent from `wrangler.jsonc`, so it must be set per environment (`.dev.vars` locally, env var on Pages) |
+
+Copy `.dev.vars.example` → `.dev.vars` to get started locally.
+
+### Fixed — critical (PR #4)
+- **JWT secret fallback removed.** `jwtSecret()` throws unless a ≥32-char secret is configured, so a deploy can never sign tokens with a hardcoded default. Anyone who knew it could mint admin tokens.
+- **No committed credentials.** `seed.sql` is content-only; the old seeded `admin@aura.app` account and its committed default password are gone. Use `scripts/bootstrap-admin.mjs`. ⚠️ **Rotate or delete that account on any environment seeded before this change.**
+- **Webhook verification is unconditional.** It previously ran only *if* a secret was present, so an unconfigured environment accepted forged payloads that activate paid plans. Signatures now use constant-time comparison, Stripe timestamps must be within 300s, and `webhook_events` (unique on `provider, event_id`) is claimed *before* activation, so a replayed event can't re-grant a plan.
+- **Simulated checkout is gated** behind `ALLOW_SIM_CHECKOUT` instead of triggering automatically whenever keys were missing.
+
+### Fixed — session & transport (PR #5)
+- **CORS allowlist.** The config reflected any `Origin` back with `credentials: true`, letting any site call the API with the victim's cookie. Origins now come from `ALLOWED_ORIGINS`; matching is exact (no suffix match, no scheme downgrade).
+- **Real token revocation.** Logout only deleted the cookie; the bearer token stayed valid for 7 days. Every token now carries a `jti` recorded in `revoked_tokens` on logout (one session only — other devices stay signed in), and `users.token_version` is snapshotted as `tv` and compared per request so `bumpTokenVersion()` can kill every session at once. Tokens issued before migration `0005` have no `tv` and are treated as version 1, so deploying doesn't force-log-out live sessions.
+- **Security headers** on every response: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, HSTS (https only), and `Cache-Control: no-store` on `/api/*`.
+- **Impersonation scoped to 30 minutes** (was a full 7-day token for someone else's account), revocable via its `jti`, and dies with the target's other sessions.
+
+### Migrations
+`0004_webhook_events.sql` (replay protection) · `0005_token_revocation.sql` (`revoked_tokens` + `users.token_version`) — apply both with the deploy.
+
+### Validation
+`tests/security-critical.test.mjs` (16 checks) + `tests/security-hardening.test.mjs` (17 checks), both wired into `npm test`. Pure logic is executed rather than pattern-matched: the CORS allowlist is tested against unlisted, suffix-matching and scheme-downgraded origins; the `token_version` comparison against legacy, stale and forged-version tokens; the webhook dedupe and timestamp window against replayed and expired events.
+
+### Deliberately not done yet
+- **CSP** — the frontend renders inline styles via `innerHTML` and loads fonts/axios from CDNs, so a policy needs a per-page visual pass. A test asserts it stays out until then.
+- Admin token still in `localStorage` (XSS-readable); no email verification, password reset or admin 2FA; rate limiting is per-isolate in memory, not global; PBKDF2 at 100k iterations (OWASP now suggests 210k).
+- **Last Updated**: 2026-08-05
+
 ## Features Not Yet Implemented
-- Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
-- Email notifications (receipts, dunning) and password reset
+- Real payment-provider round-trip (needs live Stripe/Paystack keys — `ALLOW_SIM_CHECKOUT` covers the flow in dev)
+- Email notifications (receipts, dunning), email verification and password reset
 - Reminders toggle is persisted but push/local notifications need a service worker + permission flow
 - Team/family plans, proration on mid-cycle upgrades
 
 ## Recommended Next Steps
 1. Deploy to Cloudflare Pages with real D1 + secrets
 2. Plug in live Stripe/Paystack keys and register webhook endpoints
-3. Add password reset + transactional email (Resend/SendGrid)
-4. Swap the rule-based suggestion engine for an LLM-backed one via an AI API
+3. Content-Security-Policy (needs a visual pass — see Security Hardening)
+4. Move the admin token out of `localStorage`; add email verification, password reset + transactional email (Resend/SendGrid)
+5. Swap the rule-based suggestion engine for an LLM-backed one via an AI API
