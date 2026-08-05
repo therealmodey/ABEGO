@@ -1,0 +1,14 @@
+# Local development secrets. Copy to .dev.vars (gitignored) and fill in.
+# Generate a secret: openssl rand -base64 48
+JWT_SECRET="replace-me-with-at-least-32-random-characters"
+
+# Payment providers. Webhook endpoints return 503 until the matching
+# *_WEBHOOK_SECRET (or PAYSTACK_SECRET_KEY) is configured.
+# STRIPE_SECRET_KEY=""
+# STRIPE_WEBHOOK_SECRET=""
+# PAYSTACK_SECRET_KEY=""
+# PAYSTACK_WEBHOOK_SECRET=""
+
+# DANGER: activates paid plans for free without contacting a provider.
+# Local development only — never set this in production.
+# ALLOW_SIM_CHECKOUT="1"

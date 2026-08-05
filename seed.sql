@@ -1,13 +1,12 @@
--- Seed: initial admin account (email: admin@aura.app / password: Admin123!)
--- Change the password immediately in production.
-INSERT OR IGNORE INTO users (email, password_hash, role, status) VALUES
-  ('admin@aura.app', 'pbkdf2$100000$ZESD5J+Pal22T4tB3a4Qdg==$zu7kU0lmC5zvZNP6isiOA96N/vu/pYedqjgkeyrSqLk=', 'admin', 'active');
-
-INSERT OR IGNORE INTO profiles (user_id, display_name, onboarded)
-  SELECT id, 'AURA Admin', 1 FROM users WHERE email = 'admin@aura.app';
-
-INSERT OR IGNORE INTO subscriptions (user_id, plan, status)
-  SELECT id, 'premium', 'active' FROM users WHERE email = 'admin@aura.app';
+-- Seed: reference content only.
+--
+-- SECURITY: no admin account is seeded here. Shipping a known email/password
+-- pair in the repo means anyone reading it owns every deployment that ran the
+-- seed. Create the first admin instead with:
+--
+--   node scripts/bootstrap-admin.mjs you@example.com 'a-strong-password'
+--
+-- and run the SQL it prints against your database.
 
 -- Program library (from design screen 13)
 INSERT OR IGNORE INTO programs (slug, title, category, tag, intents, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new, sort_order) VALUES

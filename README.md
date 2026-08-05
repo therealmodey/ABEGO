@@ -13,13 +13,22 @@ A production-ready guided-breathing SaaS built from the 25-artboard AURA design 
 - **Pages**: `/` (app SPA) · `/pricing` · `/billing` · `/admin`
 - **Health**: `GET /api/health`
 
-## Demo Accounts
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@aura.app` | `Admin123!` |
-| User | `test@example.com` | `Test1234!` |
+## First Admin Account
 
-> ⚠️ Change the admin password and set a real `JWT_SECRET` before production deploy.
+No account is seeded — credentials are never committed to this repo. Create the
+first admin locally or in production with:
+
+```bash
+node scripts/bootstrap-admin.mjs you@example.com 'a-strong-password' > /tmp/admin.sql
+npx wrangler d1 execute webapp-production --local  --file=/tmp/admin.sql   # dev
+npx wrangler d1 execute webapp-production --remote --file=/tmp/admin.sql   # prod
+rm /tmp/admin.sql
+```
+
+Regular users sign up through the app at `/`.
+
+> ⚠️ `JWT_SECRET` is required (min 32 chars) — the app fails closed without it.
+> Generate one with `openssl rand -base64 48`.
 
 ## Currently Completed Features
 ### Core product
@@ -89,16 +98,18 @@ A production-ready guided-breathing SaaS built from the 25-artboard AURA design 
 3. On Home, tap the orb (or long-press the FAB for quick start) to begin a breathing session; follow inhale/hold/exhale cues
 4. Check in your mood — AURA suggests a matching pattern
 5. Explore **Programs** (premium ones show a lock → upgrade modal), **Stats**, **History**, **Profile/Settings**
-6. Upgrade at `/pricing` (in sandbox mode checkout activates instantly); manage/cancel at `/billing`
-7. Admins: log in as `admin@aura.app` → auto-redirected to `/admin`
+6. Upgrade at `/pricing`; manage/cancel at `/billing`. With no payment keys configured, checkout returns
+   `503 payments_unavailable` unless `ALLOW_SIM_CHECKOUT="1"` is set (never set it in production — it
+   activates paid plans for free)
+7. Admins: log in with the bootstrapped admin account → auto-redirected to `/admin`
 
 ## Development
 ```bash
 npm run build                                              # vite build → dist/
 npx wrangler d1 migrations apply webapp-production --local # apply schema
-npx wrangler d1 execute webapp-production --local --file=./seed.sql
+npx wrangler d1 execute webapp-production --local --file=./seed.sql        # programs/content only
 pm2 start ecosystem.config.cjs                             # wrangler pages dev on :3000
-npm test                                                   # mood-transition + visual-parity suites
+npm test                                                   # UI suites + critical security invariants
 ```
 
 ## Deployment
@@ -115,7 +126,7 @@ Apple-level interaction refinement — visual design system untouched, behavior 
 - **Viewport-perfect layout**: every core screen fits 100dvh with no scroll (flex column, bottom-anchored CTAs via `.cta-anchor`, height-based compression at ≤740px/≤640px); list-heavy routes opt out via `.screen--scroll`
 - **Session completion**: primary "Return Home" CTA anchored to bottom safe area, secondary "View Insights", session state fully reset — no dead-ends
 - **Loading states**: pulsing orb (`.orb-loading`) — never static spinners
-- **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY`, then `wrangler pages deploy dist`
+- **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET` (required, >= 32 chars), `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY` (webhooks return 503 until their secrets are set), bootstrap the admin account, leave `ALLOW_SIM_CHECKOUT` unset, then `wrangler pages deploy dist`
 - **Last Updated**: 2026-07-17
 
 ## Design-System Refinement (2026-07-26)
