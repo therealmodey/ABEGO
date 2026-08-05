@@ -58,8 +58,17 @@ export interface JwtPayload {
   email: string
   role: 'user' | 'admin'
   plan: 'free' | 'pro' | 'premium'
+  jti?: string         // token id — revoked individually on logout
+  tv?: number          // users.token_version snapshot — bump revokes all tokens
+  imp_by?: number      // admin id, when this token was minted by impersonation
   iat: number
   exp: number
+}
+
+// Every token gets an id so a single session can be revoked without signing the
+// user out of their other devices.
+export function newJti(): string {
+  return b64url(crypto.getRandomValues(new Uint8Array(16)))
 }
 
 async function hmacKey(secret: string) {

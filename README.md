@@ -109,7 +109,7 @@ npm run build                                              # vite build → dist
 npx wrangler d1 migrations apply webapp-production --local # apply schema
 npx wrangler d1 execute webapp-production --local --file=./seed.sql        # programs/content only
 pm2 start ecosystem.config.cjs                             # wrangler pages dev on :3000
-npm test                                                   # UI suites + critical security invariants
+npm test                                                   # UI suites + security invariants
 ```
 
 ## Deployment
@@ -126,7 +126,7 @@ Apple-level interaction refinement — visual design system untouched, behavior 
 - **Viewport-perfect layout**: every core screen fits 100dvh with no scroll (flex column, bottom-anchored CTAs via `.cta-anchor`, height-based compression at ≤740px/≤640px); list-heavy routes opt out via `.screen--scroll`
 - **Session completion**: primary "Return Home" CTA anchored to bottom safe area, secondary "View Insights", session state fully reset — no dead-ends
 - **Loading states**: pulsing orb (`.orb-loading`) — never static spinners
-- **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET` (required, >= 32 chars), `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY` (webhooks return 503 until their secrets are set), bootstrap the admin account, leave `ALLOW_SIM_CHECKOUT` unset, then `wrangler pages deploy dist`
+- **Prod checklist**: create real D1 (`wrangler d1 create webapp-production`, update `database_id` in `wrangler.jsonc`), apply migrations `--remote`, run seed, set secrets `JWT_SECRET` (required, >= 32 chars), `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY` (webhooks return 503 until their secrets are set), bootstrap the admin account, leave `ALLOW_SIM_CHECKOUT` unset, set `ALLOWED_ORIGINS` only if another origin must call the API, then `wrangler pages deploy dist`
 - **Last Updated**: 2026-07-17
 
 ## Design-System Refinement (2026-07-26)

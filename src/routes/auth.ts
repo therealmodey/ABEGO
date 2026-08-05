@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import { setCookie, deleteCookie } from 'hono/cookie'
-import { hashPassword, verifyPassword, signJwt } from '../lib/auth'
-import { type AppEnv, jwtSecret, requireAuth, rateLimit, logActivity, clientIp, getActivePlan } from '../lib/middleware'
+import { setCookie, deleteCookie, getCookie } from 'hono/cookie'
+import { hashPassword, verifyPassword, signJwt, verifyJwt, newJti } from '../lib/auth'
+import { type AppEnv, jwtSecret, requireAuth, rateLimit, logActivity, clientIp, getActivePlan, revokeToken } from '../lib/middleware'
 
 const auth = new Hono<AppEnv>()
 
@@ -40,7 +40,7 @@ auth.post('/signup', rateLimit(10, 300, 'signup'), async (c) => {
   ])
   await logActivity(c.env.DB, userId, 'signup', { email }, clientIp(c))
 
-  const token = await signJwt({ sub: userId, email, role: 'user', plan: 'free' }, jwtSecret(c))
+  const token = await signJwt({ sub: userId, email, role: 'user', plan: 'free', jti: newJti(), tv: 1 }, jwtSecret(c))
   setAuthCookie(c, token)
   return c.json({ token, user: { id: userId, email, name: name || email.split('@')[0], role: 'user', plan: 'free', onboarded: false } }, 201)
 })
@@ -53,8 +53,8 @@ auth.post('/login', rateLimit(15, 300, 'login'), async (c) => {
   const password = String(body.password || '')
 
   const user = await c.env.DB.prepare(
-    'SELECT id, email, password_hash, role, status FROM users WHERE email = ?'
-  ).bind(email).first<{ id: number; email: string; password_hash: string; role: 'user' | 'admin'; status: string }>()
+    'SELECT id, email, password_hash, role, status, token_version FROM users WHERE email = ?'
+  ).bind(email).first<{ id: number; email: string; password_hash: string; role: 'user' | 'admin'; status: string; token_version: number }>()
 
   if (!user || !(await verifyPassword(password, user.password_hash))) {
     await logActivity(c.env.DB, user?.id ?? null, 'login_failed', { email }, clientIp(c))
@@ -70,7 +70,7 @@ auth.post('/login', rateLimit(15, 300, 'login'), async (c) => {
   ])
   await logActivity(c.env.DB, user.id, 'login', {}, clientIp(c))
 
-  const token = await signJwt({ sub: user.id, email: user.email, role: user.role, plan }, jwtSecret(c))
+  const token = await signJwt({ sub: user.id, email: user.email, role: user.role, plan, jti: newJti(), tv: user.token_version ?? 1 }, jwtSecret(c))
   setAuthCookie(c, token)
   return c.json({
     token,
@@ -79,7 +79,17 @@ auth.post('/login', rateLimit(15, 300, 'login'), async (c) => {
 })
 
 // POST /api/auth/logout
+// SECURITY: deleting the cookie is not logging out — the bearer token stays
+// valid for its full 7 days. Revoke this token's jti server-side too. Only this
+// session is killed, so other devices stay signed in as before.
 auth.post('/logout', async (c) => {
+  const raw = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') || getCookie(c, 'aura_token')
+  if (raw) {
+    try {
+      const payload = await verifyJwt(raw, jwtSecret(c))
+      if (payload) await revokeToken(c.env.DB, payload)
+    } catch { /* never let logout fail */ }
+  }
   deleteCookie(c, 'aura_token', { path: '/' })
   return c.json({ ok: true })
 })

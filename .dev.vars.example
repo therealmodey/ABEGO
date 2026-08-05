@@ -9,6 +9,11 @@ JWT_SECRET="replace-me-with-at-least-32-random-characters"
 # PAYSTACK_SECRET_KEY=""
 # PAYSTACK_WEBHOOK_SECRET=""
 
+# Cross-origin API access. Comma-separated exact origins, no trailing slash.
+# The app and its API share an origin, so leave this empty unless another origin
+# genuinely needs access. Empty = no cross-origin requests allowed.
+# ALLOWED_ORIGINS="https://staging.example.com,https://tools.example.com"
+
 # DANGER: activates paid plans for free without contacting a provider.
 # Local development only — never set this in production.
 # ALLOW_SIM_CHECKOUT="1"
