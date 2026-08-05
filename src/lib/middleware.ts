@@ -10,6 +10,7 @@ export type Bindings = {
   PAYSTACK_SECRET_KEY?: string
   PAYSTACK_WEBHOOK_SECRET?: string
   ALLOW_SIM_CHECKOUT?: string
+  ALLOWED_ORIGINS?: string
 }
 
 export type AppEnv = { Bindings: Bindings; Variables: { user: JwtPayload } }
@@ -42,6 +43,69 @@ export function hex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+// ---------- CORS ----------
+// SECURITY: the previous config reflected any Origin back with credentials:true,
+// which lets any website on the internet call this API with the user's cookie.
+// The app is served from the same origin as its API, so cross-origin access is
+// not needed at all: nothing is allowed unless ALLOWED_ORIGINS names it.
+export function parseAllowedOrigins(raw?: string): string[] {
+  return (raw || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean)
+}
+
+export function corsOrigin(env: Bindings): (origin: string) => string | null {
+  const allowed = parseAllowedOrigins(env.ALLOWED_ORIGINS)
+  return (origin: string) => (origin && allowed.includes(origin.replace(/\/$/, '')) ? origin : null)
+}
+
+// ---------- Security headers ----------
+// Defence-in-depth headers that cannot alter layout or behaviour. A
+// Content-Security-Policy is intentionally NOT set here: the frontend renders
+// inline styles via innerHTML and loads fonts/axios from CDNs, so a policy needs
+// a visual pass first and ships separately.
+export async function securityHeaders(c: Context<AppEnv>, next: Next) {
+  await next()
+  const h = c.res.headers
+  h.set('X-Content-Type-Options', 'nosniff')
+  h.set('X-Frame-Options', 'DENY')
+  h.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  h.set('Cross-Origin-Opener-Policy', 'same-origin')
+  if (new URL(c.req.url).protocol === 'https:') {
+    h.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
+  // Never let a shared cache or proxy retain authenticated API responses.
+  if (new URL(c.req.url).pathname.startsWith('/api/')) {
+    h.set('Cache-Control', 'no-store')
+  }
+}
+
+// ---------- Token revocation ----------
+// JWTs are stateless, so without this a stolen token is valid until it expires
+// (7 days) and logout only clears the cookie. See migration 0005.
+export async function revokeToken(db: D1Database, payload: JwtPayload): Promise<void> {
+  if (!payload.jti) return
+  await db.prepare('INSERT OR IGNORE INTO revoked_tokens (jti, user_id, expires_at) VALUES (?, ?, ?)')
+    .bind(payload.jti, payload.sub, payload.exp).run()
+  // Opportunistic sweep so the table cannot grow forever.
+  await db.prepare('DELETE FROM revoked_tokens WHERE expires_at < ?')
+    .bind(Math.floor(Date.now() / 1000)).run()
+}
+
+export async function isTokenRevoked(db: D1Database, jti?: string): Promise<boolean> {
+  if (!jti) return false
+  const row = await db.prepare('SELECT 1 AS hit FROM revoked_tokens WHERE jti = ?').bind(jti).first()
+  return !!row
+}
+
+// Invalidates every existing token for a user (suspension, role change, and
+// password reset once that ships).
+export async function bumpTokenVersion(db: D1Database, userId: number): Promise<void> {
+  await db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').bind(userId).run()
+}
+
 // ---------- Auth guard: validates JWT from cookie or Authorization header ----------
 export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const bearer = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
@@ -51,9 +115,19 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   if (!payload) return c.json({ error: 'Invalid or expired token' }, 401)
 
   // Re-validate role + status server-side on EVERY request (never trust the token alone)
-  const row = await c.env.DB.prepare('SELECT role, status FROM users WHERE id = ?')
-    .bind(payload.sub).first<{ role: string; status: string }>()
+  const row = await c.env.DB.prepare('SELECT role, status, token_version FROM users WHERE id = ?')
+    .bind(payload.sub).first<{ role: string; status: string; token_version: number }>()
   if (!row || row.status !== 'active') return c.json({ error: 'Account unavailable' }, 403)
+
+  // Revocation: this exact token (logout), or every token for the user (bump).
+  // Tokens minted before migration 0005 carry no `tv`; treat them as version 1
+  // so an existing session is not force-logged-out by the deploy itself.
+  if ((payload.tv ?? 1) !== (row.token_version ?? 1)) {
+    return c.json({ error: 'Session expired, please sign in again.' }, 401)
+  }
+  if (await isTokenRevoked(c.env.DB, payload.jti)) {
+    return c.json({ error: 'Session expired, please sign in again.' }, 401)
+  }
   payload.role = row.role as 'user' | 'admin'
   c.set('user', payload)
   await next()

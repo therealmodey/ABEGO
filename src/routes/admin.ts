@@ -2,12 +2,15 @@
 import { Hono } from 'hono'
 import {
   type AppEnv, requireAuth, requireAdmin, rateLimit,
-  logAudit, clientIp, cacheGet, cacheSet, cacheDel, jwtSecret,
+  logAudit, clientIp, cacheGet, cacheSet, cacheDel, jwtSecret, bumpTokenVersion,
 } from '../lib/middleware'
-import { signJwt, hashPassword } from '../lib/auth'
+import { signJwt, hashPassword, newJti } from '../lib/auth'
 import { getAiConfig, AI_DEFAULTS } from '../lib/aiconfig'
 
 const admin = new Hono<AppEnv>()
+
+// Impersonation tokens are support tools, not sessions: 30 minutes, not 7 days.
+export const IMPERSONATION_TTL_SEC = 30 * 60
 admin.use('*', requireAuth)
 admin.use('*', requireAdmin)
 admin.use('*', rateLimit(120, 60, 'admin')) // rate-limit sensitive surface
@@ -52,6 +55,8 @@ admin.put('/users/:id/role', async (c) => {
   }
 
   await c.env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, id).run()
+  // A demoted admin must not keep an admin-era session alive.
+  await bumpTokenVersion(c.env.DB, id)
   await logAudit(c.env.DB, me.sub, 'role_change', 'user', id, { from: target.role, to: role, email: target.email }, clientIp(c))
   return c.json({ ok: true })
 })
@@ -69,6 +74,8 @@ admin.put('/users/:id/status', async (c) => {
   if (target.role === 'admin' && status === 'suspended') return c.json({ error: 'Admin accounts cannot be suspended. Demote first.' }, 400)
 
   await c.env.DB.prepare('UPDATE users SET status = ? WHERE id = ?').bind(status, id).run()
+  // Suspension must take effect immediately on every device.
+  if (status === 'suspended') await bumpTokenVersion(c.env.DB, id)
   await logAudit(c.env.DB, me.sub, status === 'suspended' ? 'suspend_user' : 'reactivate_user', 'user', id, { email: target.email }, clientIp(c))
   return c.json({ ok: true })
 })
@@ -84,6 +91,7 @@ admin.delete('/users/:id', async (c) => {
   if (target.role === 'admin') return c.json({ error: 'Admin accounts cannot be deleted. Demote to user first.' }, 400)
 
   await c.env.DB.prepare("UPDATE users SET status = 'deleted', email = email || '.deleted.' || id WHERE id = ?").bind(id).run()
+  await bumpTokenVersion(c.env.DB, id)
   await logAudit(c.env.DB, me.sub, 'delete_user', 'user', id, { email: target.email }, clientIp(c))
   return c.json({ ok: true })
 })
@@ -579,9 +587,16 @@ admin.post('/users/:id/impersonate', async (c) => {
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (target.status !== 'active') return c.json({ error: 'Can only impersonate active users' }, 400)
   const plan = await c.env.DB.prepare("SELECT plan FROM subscriptions WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").bind(id).first<{ plan: string }>()
-  const token = await signJwt({ sub: target.id, email: target.email, role: target.role, plan: plan?.plan || 'free', imp_by: me.sub }, jwtSecret(c))
-  await logAudit(c.env.DB, me.sub, 'impersonate_user', 'user', id, { email: target.email }, clientIp(c))
-  return c.json({ ok: true, token, user: { id: target.id, email: target.email, role: target.role } })
+  const tv = await c.env.DB.prepare('SELECT token_version FROM users WHERE id = ?').bind(id).first<{ token_version: number }>()
+  // SECURITY: impersonation minted a full 7-day token for someone else's
+  // account. Scope it to a short support window instead.
+  const token = await signJwt(
+    { sub: target.id, email: target.email, role: target.role as 'user' | 'admin', plan: (plan?.plan || 'free') as 'free' | 'pro' | 'premium', imp_by: me.sub, jti: newJti(), tv: tv?.token_version ?? 1 },
+    jwtSecret(c),
+    IMPERSONATION_TTL_SEC,
+  )
+  await logAudit(c.env.DB, me.sub, 'impersonate_user', 'user', id, { email: target.email, ttl_sec: IMPERSONATION_TTL_SEC }, clientIp(c))
+  return c.json({ ok: true, token, expires_in: IMPERSONATION_TTL_SEC, user: { id: target.id, email: target.email, role: target.role } })
 })
 
 admin.post('/users/:id/notes', async (c) => {

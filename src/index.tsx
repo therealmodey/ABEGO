@@ -4,11 +4,17 @@ import authRoutes from './routes/auth'
 import appRoutes from './routes/app'
 import billingRoutes from './routes/billing'
 import adminRoutes from './routes/admin'
-import type { AppEnv } from './lib/middleware'
+import { type AppEnv, corsOrigin, securityHeaders } from './lib/middleware'
 
 const app = new Hono<AppEnv>()
 
-app.use('/api/*', cors({ origin: (o) => o, credentials: true }))
+app.use('*', securityHeaders)
+
+// SECURITY: explicit allowlist instead of reflecting any Origin with
+// credentials. Same-origin requests (the app itself) are unaffected — set
+// ALLOWED_ORIGINS only if a different origin genuinely needs API access.
+app.use('/api/*', (c, next) =>
+  cors({ origin: corsOrigin(c.env), credentials: true, maxAge: 86400 })(c, next))
 
 // Edge cache headers for static assets are handled by CF Pages automatically.
 
