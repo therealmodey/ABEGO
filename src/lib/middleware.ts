@@ -8,11 +8,39 @@ export type Bindings = {
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   PAYSTACK_SECRET_KEY?: string
+  PAYSTACK_WEBHOOK_SECRET?: string
+  ALLOW_SIM_CHECKOUT?: string
 }
 
 export type AppEnv = { Bindings: Bindings; Variables: { user: JwtPayload } }
 
-export const jwtSecret = (c: Context<AppEnv>) => c.env.JWT_SECRET || 'dev-secret-change-in-production'
+// SECURITY: fail closed. A hardcoded fallback secret means a single missing
+// binding turns every JWT into a forgeable token (including role:'admin'),
+// so a missing/short JWT_SECRET is a hard configuration error, never a default.
+export const MIN_JWT_SECRET_LENGTH = 32
+
+export function jwtSecret(c: Context<AppEnv>): string {
+  const secret = c.env.JWT_SECRET
+  if (!secret || secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+      `JWT_SECRET is missing or too short (need >= ${MIN_JWT_SECRET_LENGTH} chars). ` +
+      'Set it with: wrangler pages secret put JWT_SECRET'
+    )
+  }
+  return secret
+}
+
+// Constant-time comparison of two hex/ascii strings (signature verification).
+export function timingSafeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export function hex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
 
 // ---------- Auth guard: validates JWT from cookie or Authorization header ----------
 export async function requireAuth(c: Context<AppEnv>, next: Next) {

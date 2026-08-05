@@ -1,6 +1,9 @@
 // Monetization: plans, Stripe + Paystack checkout, webhooks, billing dashboard data
 import { Hono } from 'hono'
-import { type AppEnv, requireAuth, rateLimit, getActivePlan, logActivity, clientIp, cacheDel } from '../lib/middleware'
+import {
+  type AppEnv, requireAuth, rateLimit, getActivePlan, logActivity, clientIp, cacheDel,
+  timingSafeEqualStr, hex,
+} from '../lib/middleware'
 
 const billing = new Hono<AppEnv>()
 
@@ -113,8 +116,18 @@ billing.post('/checkout', requireAuth, rateLimit(10, 60, 'checkout'), async (c) 
   return c.json({ checkout_url: data.data.authorization_url, provider: 'paystack' })
 })
 
-// Sandbox simulation: instantly activates the plan and records payment (used when no API keys set)
+// Sandbox simulation: instantly activates the plan and records payment.
+// SECURITY: this hands out paid plans for free, so it is opt-in via the
+// ALLOW_SIM_CHECKOUT var and never reachable just because keys are absent.
+export const simCheckoutEnabled = (c: any) => c.env.ALLOW_SIM_CHECKOUT === '1'
+
 async function simulateCheckout(c: any, userId: number, plan: string, cycle: string, provider: string, amount: number, currency: string) {
+  if (!simCheckoutEnabled(c)) {
+    return c.json({
+      error: 'Payments are not configured on this environment.',
+      code: 'payments_unavailable',
+    }, 503)
+  }
   await activatePlan(c.env.DB, userId, plan as 'pro' | 'premium', cycle as 'monthly' | 'yearly', provider as 'stripe' | 'paystack', `sim_${Date.now()}`, amount, currency)
   await logActivity(c.env.DB, userId, 'plan_activated_simulated', { plan, cycle, provider }, clientIp(c))
   return c.json({ simulated: true, activated: true, plan, cycle, provider, message: `${provider} keys not configured — plan activated in sandbox mode.` })
@@ -156,6 +169,21 @@ billing.post('/cancel', requireAuth, async (c) => {
   return c.json({ ok: true, message: 'Subscription canceled. You have been moved to the Free plan.' })
 })
 
+// ---------- Webhook idempotency ----------
+// Returns true if this provider/event pair is new (and claims it); false if it
+// was already processed. Unique index on (provider, event_id) does the work.
+export async function claimWebhookEvent(db: D1Database, provider: string, eventId: string): Promise<boolean> {
+  if (!eventId) return true // nothing to dedupe on; process once, best effort
+  try {
+    const res = await db.prepare(
+      'INSERT OR IGNORE INTO webhook_events (provider, event_id) VALUES (?, ?)'
+    ).bind(provider, eventId).run()
+    return (res.meta?.changes ?? 0) > 0
+  } catch {
+    return true // never let the dedupe table break real payment processing
+  }
+}
+
 // ---------- Webhooks ----------
 // Stripe: verifies signature via HMAC-SHA256 of `${t}.${payload}`
 billing.post('/webhooks/stripe', async (c) => {
@@ -163,18 +191,30 @@ billing.post('/webhooks/stripe', async (c) => {
   const sigHeader = c.req.header('Stripe-Signature') || ''
   const secret = c.env.STRIPE_WEBHOOK_SECRET
 
-  if (secret) {
-    const parts = Object.fromEntries(sigHeader.split(',').map((p) => p.split('=') as [string, string]))
-    const t = parts['t'], v1 = parts['v1']
-    if (!t || !v1) return c.json({ error: 'Bad signature header' }, 400)
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-    const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${payload}`))
-    const expected = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('')
-    if (expected !== v1) return c.json({ error: 'Invalid signature' }, 400)
-    if (Math.abs(Date.now() / 1000 - parseInt(t, 10)) > 300) return c.json({ error: 'Timestamp too old' }, 400)
+  // SECURITY: verification is unconditional. Without a configured secret the
+  // endpoint cannot be trusted at all, so it refuses instead of accepting.
+  if (!secret) return c.json({ error: 'Webhook not configured' }, 503)
+
+  const parts = Object.fromEntries(sigHeader.split(',').map((p) => p.split('=') as [string, string]))
+  const t = parts['t'], v1 = parts['v1']
+  if (!t || !v1) return c.json({ error: 'Bad signature header' }, 400)
+  const ts = parseInt(t, 10)
+  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
+    return c.json({ error: 'Timestamp outside tolerance' }, 400)
+  }
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${payload}`))
+  if (!timingSafeEqualStr(hex(mac), v1)) return c.json({ error: 'Invalid signature' }, 400)
+
+  let event: any
+  try { event = JSON.parse(payload) } catch { return c.json({ error: 'Invalid JSON payload' }, 400) }
+
+  // Replay/idempotency guard: a valid event may legitimately be delivered more
+  // than once; without this, a replay stacks subscriptions and payment rows.
+  if (!(await claimWebhookEvent(c.env.DB, 'stripe', String(event.id || '')))) {
+    return c.json({ received: true, duplicate: true })
   }
 
-  const event = JSON.parse(payload)
   if (event.type === 'checkout.session.completed') {
     const s = event.data.object
     const userId = parseInt(s.metadata?.user_id, 10)
@@ -197,16 +237,24 @@ billing.post('/webhooks/stripe', async (c) => {
 billing.post('/webhooks/paystack', async (c) => {
   const payload = await c.req.text()
   const sig = c.req.header('x-paystack-signature') || ''
-  const secret = c.env.PAYSTACK_SECRET_KEY
+  // Paystack signs with the live secret key; allow a dedicated override.
+  const secret = c.env.PAYSTACK_WEBHOOK_SECRET || c.env.PAYSTACK_SECRET_KEY
 
-  if (secret) {
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'])
-    const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
-    const expected = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('')
-    if (expected !== sig) return c.json({ error: 'Invalid signature' }, 400)
+  if (!secret) return c.json({ error: 'Webhook not configured' }, 503)
+  if (!sig) return c.json({ error: 'Missing signature' }, 400)
+
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-512' }, false, ['sign'])
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
+  if (!timingSafeEqualStr(hex(mac), sig)) return c.json({ error: 'Invalid signature' }, 400)
+
+  let event: any
+  try { event = JSON.parse(payload) } catch { return c.json({ error: 'Invalid JSON payload' }, 400) }
+
+  const eventId = String(event.data?.id || event.data?.reference || '')
+  if (!(await claimWebhookEvent(c.env.DB, 'paystack', eventId))) {
+    return c.json({ received: true, duplicate: true })
   }
 
-  const event = JSON.parse(payload)
   if (event.event === 'charge.success') {
     const d = event.data
     const userId = parseInt(d.metadata?.user_id, 10)
