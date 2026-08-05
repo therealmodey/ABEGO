@@ -214,6 +214,31 @@ A fifth, subtler cause: the selected-card glow **could not interpolate**. Its sh
 
 **Validation**: `npm test` — 41 behaviour invariants (`tests/mood-transition.test.mjs`: DOM identity across 5 switches, exactly 1 POST per switch, banned-property audit, out-of-order race safety) + 13 visual-parity assertions (`tests/mood-visual-parity.test.mjs`: diffs the full style/text tree of the fixed screen against the original from `git HEAD`, unselected and selected). **54/54 pass** — the screen is visually identical, only smoother.
 
+## Global Motion & Alignment Pass (2026-08-05)
+Four motion/alignment defects were fixed app-wide. **No design, layout, spacing, sizing or UX structure was changed** — only how things move.
+
+### 1. Orb colour transitions are now truly smooth
+The orb changed colour by **swapping gradient strings**, which cannot interpolate: CSS has no defined midpoint between two `radial-gradient()`s, so a phase change snapped. The previous overlay crossfade also had two flaws — a one-frame handoff flash when the overlay was promoted to the base layer, and the overlay being double-composited through `.orb-blob-b`'s `mix-blend-mode: screen`. On top of that, four separate CSS `transition: background` declarations competed with the JS timeline: because JS rewrote the gradient every frame, each frame *restarted* a 400ms transition, and the two curves fighting each other read as stutter.
+
+- **Numeric interpolation, not string swapping**: `phasePalette(phase)` derives the palette from state (never a hardcoded switch), `mixPalette()` lerps every channel of every colour, and `gradientsFrom()` rebuilds the gradient strings per frame. At `t=0` and `t=1` the output is byte-equivalent to the original design colours, so endpoints are pixel-identical.
+- **One animation timeline**: `setOrbPhase` holds a single cancellable `requestAnimationFrame` handle (`_orbRaf`). A phase change mid-fade cancels the previous frame loop and interpolates **from the colour currently on screen** (`_orbShown`), so an interrupted transition continues rather than jumping.
+- **Ease-in-out**: a cubic `easeInOut` over 600–1200ms (scaled from the phase duration) replaces linear stepping.
+- **No competing animations**: the CSS colour transitions were removed from all four orb layers — JS now owns the only colour timeline. The `.orb-fade` overlay and `crossfadeLayer()` were retired.
+- **Reduced motion** applies the target palette immediately, and a theme change invalidates the cached start colour so a light↔dark switch never mixes across palettes.
+
+### 2. & 3. Jitter eliminated everywhere, with the same fix
+The Home fix's root cause — a route holding state in a closure and calling `root.innerHTML = ...` on every interaction — existed in three more places. Each was converted to the same **render-once + patch-in-place** pattern:
+
+- **Library (`routes.programs`)** — switching guided journeys rebuilt the whole list. Now every card and category heading is emitted once with a stable `data-card`/`data-cat` identity and toggled via a `.lib-off` visibility class. Filtering runs a **single-timeline opacity crossfade**: fade out (170ms) → swap visibility at the zero-opacity midpoint → fade in, so the unavoidable reflow happens while invisible. Category headings hide with their sections, filter semantics are unchanged, and `GET /app/programs` fires exactly once.
+- **Personalize (`routes.personalize`)** — goal/length taps re-invoked the route. Now selection patches only the affected cards, so the slider's drag state and every card's DOM identity survive.
+- **Settings (`routes.settings`)** — the appearance switch queued a deferred full re-render after the theme crossfade. Now the chips, ambience dot and theme label are patched in place.
+- **Banned-property audit**: all 7 remaining `transition: all` declarations were replaced with explicit non-layout property lists (`transition: all` silently makes width/padding/font-size animatable). Both toggle knobs (`.toggle::after`, `.scc-toggle span::after`) now travel via `translateX` instead of `left` — composited instead of dirtying layout each frame — with the press-scale composed through a separate custom property so `:active` can't cancel the travel. The only remaining layout animations are six admin data-viz bar fills, whose `width` **is** the datum; each is wrapped in a `contain: layout` track so the reflow cannot propagate to an ancestor.
+
+### 4. Countdown circle is now perfectly centred
+`.progress-ring` used `position: absolute` with **no offsets**, so it fell back to its *static position* — which inside a centering flex container places it low and to the right of its sibling orb. That is the reported "bottom-right" bug. It is now centred with `inset: 0; margin: auto` (the SVG has an intrinsic size, so auto margins resolve symmetrically on both axes) — offset-free, responsive at any size, and stable while the countdown animates because only `stroke-dashoffset` changes. A stray inline `<span id="ring-holder">` wrapper that broke the positioning context was removed, and a `viewBox` was added so the ring scales cleanly. `rotate(-90deg)` is preserved.
+
+**Validation**: `npm test` — **151/151 pass**. The 54 existing mood assertions confirm the Home fix is not rebroken, plus 97 new assertions in `tests/motion-global.test.mjs`: orb interpolation (≥12 distinct intermediate colours, monotonic channel progression, ease-in-out curve verification, interrupt continuity, exactly one live rAF timeline), ring centring (offset-free, geometry and style provably unchanged across the whole countdown), Library (node identity across 6 filter switches, one network call, opacity-only crossfade, zero layout mutation), and a global stylesheet audit that fails on any `transition: all` or uncontained layout-property transition.
+
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — simulation covers the flow today)
 - Email notifications (receipts, dunning) and password reset

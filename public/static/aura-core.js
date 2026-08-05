@@ -127,25 +127,96 @@
   };
   const SCALE = { inhale: 1.18, hold: 1.20, exhale: 0.92, idle: 1.0 };
 
-  // Gradient CSS for the main orb body in the active theme
-  function orbGradients(phase) {
+  // ---------- Color interpolation primitives ----------
+  // CSS cannot interpolate gradients, so orb color changes are driven by a
+  // single requestAnimationFrame timeline that numerically mixes the PREVIOUS
+  // palette into the NEXT one and rewrites the gradient strings each frame.
+  // That is what turns an abrupt gradient swap into a true colour flow.
+  function parseColor(c) {
+    c = String(c).trim();
+    if (c.charAt(0) === '#') {
+      let h = c.slice(1);
+      if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      const a = h.length >= 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
+      return [r || 0, g || 0, b || 0, a];
+    }
+    const m = c.match(/rgba?\(([^)]+)\)/);
+    if (m) {
+      const p = m[1].split(',').map((x) => parseFloat(x));
+      return [p[0] || 0, p[1] || 0, p[2] || 0, p.length > 3 && !isNaN(p[3]) ? p[3] : 1];
+    }
+    return [0, 0, 0, 1];
+  }
+  function mixColor(from, to, t) {
+    return [
+      from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t,
+      from[2] + (to[2] - from[2]) * t,
+      from[3] + (to[3] - from[3]) * t,
+    ];
+  }
+  function rgbaStr(c) {
+    // 4dp keeps 8-bit hex alphas (n/255) exact enough to be sub-perceptual at
+    // the timeline endpoints, so t=0 / t=1 render the original design colours.
+    const a = Math.round(c[3] * 10000) / 10000;
+    return `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a})`;
+  }
+  function withAlpha(c, a) { return [c[0], c[1], c[2], a]; }
+  // ease-in-out (cubic) — symmetric acceleration/deceleration, no snapping
+  function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+  function prefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  // Hex alpha suffixes used by the light palette, kept exact so an
+  // interpolated palette at t=0 / t=1 renders the same pixels as before.
+  const A_20 = 32 / 255, A_25 = 37 / 255, A_40 = 64 / 255;
+
+  // A phase's colours as numbers — the single source of truth the orb reads.
+  function phasePalette(phase) {
     if (Theme.mode === 'light') {
       const p = PHASE_LIGHT[phase] || PHASE_LIGHT.idle;
-      return {
-        glow: p.glow,
-        bodyBg: `radial-gradient(circle at 35% 30%, rgba(255,255,255,1) 0%, ${p.a} 25%, ${p.b} 60%, ${p.c}20 90%)`,
-        bodyShadow: `inset -10px -10px 30px ${p.c}25, inset 10px 15px 30px rgba(255,255,255,0.8), 0 0 60px ${p.glow}`,
-        vaporBg: `radial-gradient(circle at 65% 68%, ${p.c}40 0%, transparent 55%)`,
-      };
+      return { light: true, a: parseColor(p.a), b: parseColor(p.b), c: parseColor(p.c), glow: parseColor(p.glow) };
     }
     const p = PHASE[phase] || PHASE.idle;
+    const col = parseColor(p.b);
+    return { light: false, a: parseColor(p.a), b: col, c: col, glow: parseColor(p.glow) };
+  }
+  function mixPalette(from, to, t) {
     return {
-      glow: p.glow,
-      bodyBg: `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, ${p.a} 30%, ${p.b} 65%, #1a0f3a 100%)`,
-      bodyShadow: `inset -20px -20px 60px rgba(0,0,0,0.4), inset 15px 20px 40px rgba(255,255,255,0.25), 0 0 80px ${p.glow}`,
-      vaporBg: `radial-gradient(circle at 68% 72%, ${p.b} 0%, transparent 60%)`,
+      light: to.light,
+      a: mixColor(from.a, to.a, t),
+      b: mixColor(from.b, to.b, t),
+      c: mixColor(from.c || to.c, to.c, t),
+      glow: mixColor(from.glow, to.glow, t),
     };
   }
+
+  // Gradient CSS for every coloured orb layer, built from a numeric palette.
+  function gradientsFrom(p) {
+    if (p.light) {
+      return {
+        glow: rgbaStr(p.glow),
+        auraBg: `radial-gradient(circle, ${rgbaStr(p.glow)} 0%, transparent 60%)`,
+        haloBg: `radial-gradient(circle, transparent 55%, ${rgbaStr(p.glow)} 62%, transparent 78%)`,
+        bodyBg: `radial-gradient(circle at 35% 30%, rgba(255,255,255,1) 0%, ${rgbaStr(p.a)} 25%, ${rgbaStr(p.b)} 60%, ${rgbaStr(withAlpha(p.c, A_20))} 90%)`,
+        bodyShadow: `inset -10px -10px 30px ${rgbaStr(withAlpha(p.c, A_25))}, inset 10px 15px 30px rgba(255,255,255,0.8), 0 0 60px ${rgbaStr(p.glow)}`,
+        vaporBg: `radial-gradient(circle at 65% 68%, ${rgbaStr(withAlpha(p.c, A_40))} 0%, transparent 55%)`,
+      };
+    }
+    return {
+      glow: rgbaStr(p.glow),
+      auraBg: `radial-gradient(circle, ${rgbaStr(p.glow)} 0%, transparent 60%)`,
+      haloBg: `radial-gradient(circle, transparent 55%, ${rgbaStr(p.glow)} 62%, transparent 78%)`,
+      bodyBg: `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.95) 0%, ${rgbaStr(p.a)} 30%, ${rgbaStr(p.b)} 65%, #1a0f3a 100%)`,
+      bodyShadow: `inset -20px -20px 60px rgba(0,0,0,0.4), inset 15px 20px 40px rgba(255,255,255,0.25), 0 0 80px ${rgbaStr(p.glow)}`,
+      vaporBg: `radial-gradient(circle at 68% 72%, ${rgbaStr(p.b)} 0%, transparent 60%)`,
+    };
+  }
+
+  // Gradient CSS for the main orb body in the active theme
+  function orbGradients(phase) { return gradientsFrom(phasePalette(phase)); }
 
   // ---------- Orb ----------
   function orbHTML(size, phase, opts) {
@@ -154,88 +225,112 @@
     const intensity = opts.intensity != null ? opts.intensity : 0.75;
     const scale = (SCALE[phase] || 1) * (0.85 + intensity * 0.25);
     const aura = opts.showAura === false ? '' :
-      `<div class="orb-aura" style="inset:${-size * 0.6}px;background:radial-gradient(circle, ${g.glow} 0%, transparent 60%)"></div>`;
+      `<div class="orb-aura" style="inset:${-size * 0.6}px;background:${g.auraBg}"></div>`;
     const anim = opts.animate === false ? 'style="animation:none"' : '';
-    // .orb-fade children carry the NEXT gradient during phase transitions so
-    // colors flow into each other (gradients can't interpolate natively).
+    // Colour changes are interpolated in place by setOrbPhase (see below), so
+    // every layer here is a single stable node for the life of the screen.
     return `
     <div class="orb-wrap" data-orb data-phase="${phase}" style="width:${size}px;height:${size}px;transform:scale(${scale})">
       ${aura}
-      <div class="orb-halo" style="background:radial-gradient(circle, transparent 55%, ${g.glow} 62%, transparent 78%)"></div>
-      <div class="orb-blob-a" ${anim} style="background:${g.bodyBg};box-shadow:${g.bodyShadow}"><div class="orb-fade"></div></div>
-      <div class="orb-blob-b" ${anim} style="background:${g.vaporBg}"><div class="orb-fade"></div></div>
+      <div class="orb-halo" style="background:${g.haloBg}"></div>
+      <div class="orb-blob-a" ${anim} style="background:${g.bodyBg};box-shadow:${g.bodyShadow}"></div>
+      <div class="orb-blob-b" ${anim} style="background:${g.vaporBg}"></div>
       <div class="orb-specular"></div>
       <div class="orb-spark"></div>
       <div class="orb-innerring"></div>
     </div>`;
   }
 
-  // Update an existing orb in place. Colors CROSSFADE via an overlay layer
-  // (600–1200ms ease-in-out) instead of hard-switching gradients; scale
-  // rides the breath duration as before.
+  // Paint an orb's coloured layers from a numeric palette. Pure write — no
+  // reads, no layout properties, so a frame costs one composite.
+  function paintOrb(el, palette) {
+    const g = gradientsFrom(palette);
+    const aura = el.querySelector('.orb-aura');
+    if (aura) aura.style.background = g.auraBg;
+    const halo = el.querySelector('.orb-halo');
+    if (halo) halo.style.background = g.haloBg;
+    const a = el.querySelector('.orb-blob-a');
+    if (a) { a.style.background = g.bodyBg; a.style.boxShadow = g.bodyShadow; }
+    const b = el.querySelector('.orb-blob-b');
+    if (b) b.style.background = g.vaporBg;
+  }
+
+  // Update an existing orb in place.
+  //
+  // Colour is INTERPOLATED, not swapped. One requestAnimationFrame timeline
+  // per orb numerically mixes the palette it is currently showing into the
+  // palette the new phase asks for, easing in and out, and rewrites every
+  // coloured layer from that single mixed value each frame. Consequences:
+  //   * no abrupt jump — every intermediate colour actually exists
+  //   * exactly one timeline per orb; starting a new phase cancels the old
+  //     one and continues from the colour on screen, so an early phase change
+  //     bends the curve instead of snapping back
+  //   * no overlay/base handoff, so the old promote-to-base frame (and the
+  //     mix-blend-mode:screen double-composite it caused) is gone
+  //   * colour is derived from state (data-phase -> palette), never from a
+  //     hardcoded per-phase branch at the call site
+  // Scale still rides the breath duration on its own transform transition.
   function setOrbPhase(el, phase, intensity, durMs) {
     if (!el) return;
     intensity = intensity != null ? intensity : 0.75;
     const scale = (SCALE[phase] || 1) * (0.85 + intensity * 0.25);
     el.style.transitionDuration = (durMs || 4000) + 'ms';
     el.style.transform = `scale(${scale})`;
-    if (el.dataset.phase === phase) return; // same colors — only scale updates
+    // The phase the orb is currently showing. Falls back to the rendered
+    // data-phase attribute so the first in-place update after orbHTML()
+    // interpolates away from the colours actually on screen.
+    const shownPhase = el._orbPhase || el.dataset.phase || phase;
+    if (shownPhase === phase && el._orbShown) return; // same colours — only scale updates
     el.dataset.phase = phase;
-    const g = orbGradients(phase);
 
-    // Color crossfade: proportional to the phase length, clamped 600–1200ms
+    const to = phasePalette(phase);
+    // Where the orb visually is right now: the last painted mix if a fade is
+    // still in flight, otherwise the palette of the phase it was showing. A
+    // theme switch invalidates the cached mix (different palette family), so
+    // fall back to a clean same-theme reading of the previous phase.
+    const themeChanged = el._orbTheme != null && el._orbTheme !== Theme.mode;
+    const from = (!themeChanged && el._orbShown) || phasePalette(shownPhase);
+    el._orbTheme = Theme.mode;
+    el._orbPhase = phase;
+
+    // Cancel the in-flight timeline first — there is never more than one.
+    if (el._orbRaf) { cancelAnimationFrame(el._orbRaf); el._orbRaf = 0; }
+
+    // Fade length is proportional to the phase, clamped to the design range.
     const fadeMs = Math.max(600, Math.min(1200, (durMs || 4000) * 0.3));
-
-    // Aura + halo are heavily blurred, so an eased background swap already
-    // reads as a soft flow.
-    const aura = el.querySelector('.orb-aura');
-    if (aura) {
-      aura.style.transition = `background ${fadeMs}ms ease-in-out`;
-      aura.style.background = `radial-gradient(circle, ${g.glow} 0%, transparent 60%)`;
-    }
-    const halo = el.querySelector('.orb-halo');
-    if (halo) {
-      halo.style.transition = `background ${fadeMs}ms ease-in-out`;
-      halo.style.background = `radial-gradient(circle, transparent 55%, ${g.glow} 62%, transparent 78%)`;
+    if (shownPhase === phase || prefersReducedMotion() || fadeMs <= 0) {
+      el._orbShown = to;
+      paintOrb(el, to);
+      return;
     }
 
-    // Body + vapor: fade the NEW gradient in on an overlay, then promote it
-    // to the base layer once fully opaque. No hard switch is ever visible.
-    crossfadeLayer(el.querySelector('.orb-blob-a'), g.bodyBg, fadeMs, g.bodyShadow);
-    crossfadeLayer(el.querySelector('.orb-blob-b'), g.vaporBg, fadeMs);
-  }
-
-  function crossfadeLayer(layer, nextBg, fadeMs, nextShadow) {
-    if (!layer) return;
-    let fade = layer.querySelector('.orb-fade');
-    if (!fade) { fade = document.createElement('div'); fade.className = 'orb-fade'; layer.appendChild(fade); }
-    if (layer._fadeTimer) clearTimeout(layer._fadeTimer);
-    fade.style.transition = 'none';
-    fade.style.opacity = '0';
-    fade.style.background = nextBg;
-    // box-shadow interpolates natively — ease it alongside the fade
-    if (nextShadow) {
-      layer.style.transition = `box-shadow ${fadeMs}ms ease-in-out`;
-      layer.style.boxShadow = nextShadow;
-    }
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      fade.style.transition = `opacity ${fadeMs}ms ease-in-out`;
-      fade.style.opacity = '1';
-      layer._fadeTimer = setTimeout(() => {
-        layer.style.background = nextBg; // promote to base
-        fade.style.transition = 'none';
-        fade.style.opacity = '0';
-      }, fadeMs + 40);
-    }));
+    const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    const step = (now) => {
+      const raw = Math.min(1, ((now || t0) - t0) / fadeMs);
+      const mixed = raw >= 1 ? to : mixPalette(from, to, easeInOut(raw));
+      el._orbShown = mixed;
+      paintOrb(el, mixed);
+      if (raw < 1) el._orbRaf = requestAnimationFrame(step);
+      else el._orbRaf = 0;
+    };
+    el._orbRaf = requestAnimationFrame(step);
   }
 
   // ---------- Progress ring ----------
+  // The SVG is absolutely positioned so it can overlay the orb without
+  // consuming layout space. It is centred on both axes with inset:0 +
+  // margin:auto — the SVG has an intrinsic width/height, so auto margins
+  // resolve symmetrically inside the positioned parent at any parent size.
+  // No hardcoded offsets, nothing to recompute on resize, and because the
+  // element only ever animates stroke-dashoffset, the centre never drifts.
+  // (Previously this was `position:absolute` with no offsets at all, so the
+  // ring fell back to its static position and sat low-right of the orb.)
   function ringHTML(size, progress, stroke, color) {
     stroke = stroke || 2;
     const r = (size - stroke * 2) / 2;
     const circ = 2 * Math.PI * r;
     return `
-    <svg class="progress-ring" width="${size}" height="${size}" style="position:absolute;transform:rotate(-90deg)">
+    <svg class="progress-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="position:absolute;inset:0;margin:auto;transform:rotate(-90deg)">
       <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${stroke}"/>
       <circle data-ring cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color || 'url(#auraRingGrad)'}" stroke-width="${stroke}"
         stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${circ * (1 - progress)}"/>

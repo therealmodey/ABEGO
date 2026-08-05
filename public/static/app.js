@@ -34,6 +34,30 @@
     const b = document.getElementById('back-btn');
     if (b) b.onclick = () => go(target || BACK_TARGET[(location.hash || '#').slice(1).split('?')[0]] || 'home');
   }
+  // Selection glow for .glass cards, written so it INTERPOLATES.
+  //
+  // box-shadow only animates between two lists when the `inset` keyword
+  // matches at every position; if the lists differ in length or ordering the
+  // browser hard-swaps them at the midpoint, which reads as a snap. So the
+  // glow is emitted in the same inset/outset pattern as the active theme's
+  // base .glass shadow, padded with zero-size fully transparent entries where
+  // the counts differ. Those entries paint nothing. Reordering across
+  // inset/outset is pixel-neutral (inset clips inside the border box, outset
+  // paints outside — disjoint regions), so the rendered glow is unchanged.
+  const NIL_INSET = 'inset 0 0 0 0 rgba(0,0,0,0)';
+  const NIL_OUTSET = '0 0 0 0 rgba(0,0,0,0)';
+  function interpolableGlow(ring, glow) {
+    // light .glass = [inset, inset, outset, outset]; dark .glass = [inset, outset]
+    return Theme.mode === 'light'
+      ? `${ring}, ${NIL_INSET}, ${glow}, ${NIL_OUTSET}`
+      : `${ring}, ${glow}`;
+  }
+  // Onboarding goal cards: same pixels as the original `0 0 32px ${c}55,
+  // inset 0 0 0 1px ${c}88`, restructured so it can ease in and out.
+  function goalGlow(color) {
+    return interpolableGlow(`inset 0 0 0 1px ${color}88`, `0 0 32px ${color}55`);
+  }
+
   // Loading placeholder: the pulsing orb IS the loader (never a static spinner).
   function loadingScreen(hue) {
     return `${bgHTML(hue)}<section class="screen" style="align-items:center;justify-content:center"><div class="orb-loading">${orbHTML(140, 'idle')}</div></section>`;
@@ -305,7 +329,7 @@
         <div class="overline" style="margin-bottom:14px">Your goal</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px" id="goal-grid">
           ${goals.map((g) => `
-          <button class="glass goal-card" data-goal="${g.id}" style="padding:20px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;border-radius:18px;transition:all 400ms cubic-bezier(0.4,0,0.2,1);${ob.goal === g.id ? `box-shadow:0 0 32px ${g.color}55, inset 0 0 0 1px ${g.color}88;` : ''}">
+          <button class="glass goal-card" data-goal="${g.id}" style="padding:20px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;border-radius:18px;transition:box-shadow 400ms cubic-bezier(0.4,0,0.2,1), transform 400ms cubic-bezier(0.4,0,0.2,1);${ob.goal === g.id ? `box-shadow:${goalGlow(g.color)};` : ''}">
             <span style="color:${g.color}">${icon(g.ic, 26)}</span>
             <span style="font-size:13px;font-weight:500">${g.label}</span>
           </button>`).join('')}
@@ -328,8 +352,39 @@
       onMove: (v) => setSliderVal(document.getElementById('stress-val'), `${stressLabel(v)} · ${v}`),
       onCommit: (v) => { ob.stress = v; },
     });
-    document.querySelectorAll('.goal-card').forEach((b) => b.onclick = () => { ob.goal = b.dataset.goal; routes.personalize(); });
-    document.querySelectorAll('[data-len]').forEach((b) => b.onclick = () => { ob.length = +b.dataset.len; routes.personalize(); });
+    // Same global fix as the mood check-in: tapping a goal or a length used to
+    // call routes.personalize(), re-running root.innerHTML and rebuilding the
+    // whole screen — replaying the 420ms enter animation, restarting the
+    // ambient-drift keyframes on a new .aura-bg and re-rasterizing the glass
+    // cards. Selection is now patched on the SAME nodes, so the glow and the
+    // chip state ease over 400ms instead of the screen jolting.
+    const goalCards = Array.prototype.slice.call(document.querySelectorAll('.goal-card'));
+    const lenChips = Array.prototype.slice.call(document.querySelectorAll('[data-len]'));
+    const goalColor = {};
+    goals.forEach((g) => { goalColor[g.id] = g.color; });
+    goalCards.forEach((b) => { b.setAttribute('aria-pressed', ob.goal === b.dataset.goal ? 'true' : 'false'); });
+    lenChips.forEach((b) => { b.setAttribute('aria-pressed', ob.length === +b.dataset.len ? 'true' : 'false'); });
+    goalCards.forEach((b) => b.onclick = () => {
+      if (ob.goal === b.dataset.goal) return;
+      ob.goal = b.dataset.goal;
+      goalCards.forEach((c) => {
+        const on = c.dataset.goal === ob.goal;
+        c.style.boxShadow = on ? goalGlow(goalColor[c.dataset.goal]) : '';
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      haptic(8);
+    });
+    lenChips.forEach((b) => b.onclick = () => {
+      const v = +b.dataset.len;
+      if (ob.length === v) return;
+      ob.length = v;
+      lenChips.forEach((c) => {
+        const on = +c.dataset.len === v;
+        c.classList.toggle('selected', on);
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      haptic(6);
+    });
     document.getElementById('next-btn').onclick = () => go('permissions');
     document.getElementById('skip-btn').onclick = () => go('permissions');
   };
@@ -526,7 +581,7 @@
       </header>
       <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
         <div style="position:relative;width:320px;height:320px;display:flex;align-items:center;justify-content:center">
-          <span id="ring-holder">${ringHTML(320, 0, 2)}</span>
+          ${ringHTML(320, 0, 2)}
           ${orbHTML(240, 'inhale', { intensity: 0.85 })}
         </div>
         <div style="text-align:center;margin-top:28px">
@@ -537,7 +592,7 @@
       <div style="padding:0 20px 40px">
         <div class="glass" style="padding:16px 18px;display:flex;align-items:center;gap:16px">
           <span class="tabular" id="elapsed" style="font-size:14px;color:var(--text-secondary)">00:00</span>
-          <div style="flex:1;height:4px;border-radius:2px;background:var(--glass-heavy);overflow:hidden">
+          <div style="flex:1;height:4px;border-radius:2px;background:var(--glass-heavy);overflow:hidden;contain:layout size">
             <div id="progress-bar" style="height:100%;width:0%;border-radius:2px;background:linear-gradient(90deg,#7C3AED,#22D3EE);transition:width 1s linear"></div>
           </div>
           <button class="btn-icon" id="pause-btn" style="width:44px;height:44px" aria-label="Pause">${icon('pause', 17)}</button>
@@ -702,24 +757,12 @@
     const EASE = 'cubic-bezier(0.4,0,0.2,1)';   // ease-in-out, matches design tokens
     const HALF = reduced ? 0 : 190;             // half of the copy crossfade timeline
 
-    // Selected-card glow. Same pixels as before, but the shadow LIST is
-    // written to match the structure of the active theme's base .glass shadow
-    // (equal count, same inset/outset ordering). box-shadow only interpolates
-    // between structurally identical lists — otherwise it hard-swaps at the
-    // midpoint. The zero-size fully transparent entries paint nothing and
-    // exist purely to line the lists up, which is what lets the glow ease in
-    // and out. Outset and inset shadows cover disjoint regions, so reordering
-    // them is visually identical to the original declaration.
-    const NIL_INSET = 'inset 0 0 0 0 rgba(0,0,0,0)';
-    const NIL_OUTSET = '0 0 0 0 rgba(0,0,0,0)';
+    // Selected-card glow, structured so box-shadow can interpolate rather
+    // than hard-swap at the midpoint. See interpolableGlow() at the top of
+    // this file for why the shadow list is shaped the way it is.
     function glowFor(phase) {
       const p = PHASE[phase] || PHASE.idle;
-      const ring = `inset 0 0 0 1px ${p.a}66`;
-      const glow = `0 0 32px ${p.glow}`;
-      // light .glass = [inset, inset, outset, outset]; dark .glass = [inset, outset]
-      return Theme.mode === 'light'
-        ? `${ring}, ${NIL_INSET}, ${glow}, ${NIL_OUTSET}`
-        : `${ring}, ${glow}`;
+      return interpolableGlow(`inset 0 0 0 1px ${p.a}66`, `0 0 32px ${p.glow}`);
     }
 
     const state = { selected: null, suggestion: null };
@@ -969,45 +1012,126 @@
       return intents.includes(key) || (p.tag || '').toLowerCase() === key;
     }
 
-    function render() {
-      const list = d.programs.filter((p) => matchesFilter(p, filter));
-      root.innerHTML = `${bgHTML()}
-      <section class="screen screen--scroll" style="padding:24px 20px 40px">
-        <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
-          <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
-          <span class="overline">Library</span><span style="width:40px"></span>
-        </header>
-        <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:6px">Guided journeys</h1>
-        <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:20px">Curated breathing programs for every state of mind.</p>
-        <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:22px">
-          ${tagFilters.map((t) => `<button class="chip ${filter === t ? 'selected' : ''}" data-f="${t}" style="flex-shrink:0">${t}</button>`).join('')}
-        </div>
-        ${Object.entries(cats).map(([catId, catLabel]) => {
-          const items = list.filter((p) => p.category === catId);
-          if (!items.length) return '';
-          return `<div class="overline" style="margin:18px 0 12px">${catLabel}</div>
-          ${items.map((p) => `
-          <article class="glass" style="padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px;${p.is_new ? 'border-color:rgba(167,139,250,0.4);box-shadow:0 0 40px rgba(124,58,237,0.2), inset 0 1px 0 rgba(255,255,255,0.1), 0 20px 40px rgba(0,0,0,0.35)' : ''}">
-            <span style="width:56px;height:56px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), ${PHASE[p.phase] ? PHASE[p.phase].a : '#7C3AED'} 40%, ${PHASE[p.phase] ? PHASE[p.phase].b : '#22D3EE'} 80%);box-shadow:0 0 20px ${PHASE[p.phase] ? PHASE[p.phase].glow : 'rgba(124,58,237,0.5)'};${p.locked ? 'filter:saturate(0.4);opacity:0.6' : ''}"></span>
-            <span style="flex:1">
-              <span style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-weight:500">${p.title}</span>
-              ${p.is_new ? '<span class="badge badge--premium">NEW</span>' : ''}
-              ${p.locked ? `<span style="color:var(--text-tertiary)">${icon('shield', 13)}</span>` : ''}</span>
-              <span style="display:block;font-size:12px;color:var(--text-tertiary);margin-top:3px">${p.duration_min} min · ${p.tag} · ${p.inhale}-${p.hold}-${p.exhale}</span>
-            </span>
-            <button class="btn-icon" data-play="${p.id}" style="width:44px;height:44px;${p.locked ? 'opacity:0.4' : ''}" aria-label="Play ${p.title}">${icon('play', 16)}</button>
-          </article>`).join('')}`;
-        }).join('')}
-      </section>`;
-      document.getElementById('back-btn').onclick = () => go('home');
-      document.querySelectorAll('[data-f]').forEach((b) => b.onclick = () => { filter = b.dataset.f; render(); });
-      document.querySelectorAll('[data-play]').forEach((b) => b.onclick = () => {
-        const p = d.programs.find((x) => x.id === +b.dataset.play);
-        if (p.locked) return upgradeModal(`"${p.title}" is part of AURA Pro. Unlock every program plus deep analytics.`);
-        sessionSetup(p);
+    // RENDER-ONCE screen (same fix as the mood check-in).
+    //
+    // Switching guided journeys used to call render() -> root.innerHTML, which
+    // destroyed and rebuilt the entire Library on every chip tap. That replayed
+    // .screen's 420ms auraScreenIn enter animation (the whole screen slid 12px
+    // and rescaled), restarted the 45s auraAmbientDrift keyframes on a brand
+    // new .aura-bg so the gradient snapped back to 0%, and re-rasterized every
+    // backdrop-filter: blur(24px) glass card plus the star field — all on one
+    // frame. That was the jitter.
+    //
+    // Now the container, the chips and EVERY journey card are created once and
+    // keep their identity for the life of the screen. A filter change patches
+    // only what actually differs: chip selection (eased in place by .chip's own
+    // transition) and card visibility, wrapped in a single-timeline crossfade
+    // so the list reflow happens while the content is at zero opacity — no
+    // visible layout shift, no flicker. Markup and ordering are byte-identical
+    // to the previous output for any given filter.
+    const EASE = 'cubic-bezier(0.4,0,0.2,1)';
+    const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const HALF = reduced ? 0 : 170;   // half of the list crossfade timeline
+
+    // Every category section and card is emitted up front. Nodes that the
+    // active filter excludes carry .lib-off (display:none) — for flex layout
+    // that is indistinguishable from the node being absent, which is what the
+    // old rebuild produced.
+    const off = (on) => (on ? '' : ' lib-off');
+    root.innerHTML = `${bgHTML()}
+    <section class="screen screen--scroll" style="padding:24px 20px 40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
+        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <span class="overline">Library</span><span style="width:40px"></span>
+      </header>
+      <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:6px">Guided journeys</h1>
+      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:20px">Curated breathing programs for every state of mind.</p>
+      <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:22px">
+        ${tagFilters.map((t) => `<button class="chip ${filter === t ? 'selected' : ''}" data-f="${t}" style="flex-shrink:0">${t}</button>`).join('')}
+      </div>
+      ${Object.entries(cats).map(([catId, catLabel]) => {
+        const items = d.programs.filter((p) => p.category === catId);
+        if (!items.length) return '';
+        const anyVisible = items.some((p) => matchesFilter(p, filter));
+        return `<div class="overline${off(anyVisible)}" data-cat="${catId}" style="margin:18px 0 12px">${catLabel}</div>
+        ${items.map((p) => `
+        <article class="glass${off(matchesFilter(p, filter))}" data-card="${p.id}" data-cat="${catId}" style="padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:12px;${p.is_new ? 'border-color:rgba(167,139,250,0.4);box-shadow:0 0 40px rgba(124,58,237,0.2), inset 0 1px 0 rgba(255,255,255,0.1), 0 20px 40px rgba(0,0,0,0.35)' : ''}">
+          <span style="width:56px;height:56px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), ${PHASE[p.phase] ? PHASE[p.phase].a : '#7C3AED'} 40%, ${PHASE[p.phase] ? PHASE[p.phase].b : '#22D3EE'} 80%);box-shadow:0 0 20px ${PHASE[p.phase] ? PHASE[p.phase].glow : 'rgba(124,58,237,0.5)'};${p.locked ? 'filter:saturate(0.4);opacity:0.6' : ''}"></span>
+          <span style="flex:1">
+            <span style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-weight:500">${p.title}</span>
+            ${p.is_new ? '<span class="badge badge--premium">NEW</span>' : ''}
+            ${p.locked ? `<span style="color:var(--text-tertiary)">${icon('shield', 13)}</span>` : ''}</span>
+            <span style="display:block;font-size:12px;color:var(--text-tertiary);margin-top:3px">${p.duration_min} min · ${p.tag} · ${p.inhale}-${p.hold}-${p.exhale}</span>
+          </span>
+          <button class="btn-icon" data-play="${p.id}" style="width:44px;height:44px;${p.locked ? 'opacity:0.4' : ''}" aria-label="Play ${p.title}">${icon('play', 16)}</button>
+        </article>`).join('')}`;
+      }).join('')}
+    </section>`;
+
+    // Stable node references — captured once, never re-queried after a switch.
+    const chips = Array.prototype.slice.call(document.querySelectorAll('[data-f]'));
+    const cards = Array.prototype.slice.call(document.querySelectorAll('[data-card]'));
+    const heads = Array.prototype.slice.call(document.querySelectorAll('[data-cat].overline'));
+    const listNodes = heads.concat(cards);
+    const byId = {};
+    d.programs.forEach((p) => { byId[p.id] = p; });
+    let fadeTimer = 0;
+
+    function paintChips() {
+      chips.forEach((c) => {
+        const on = c.dataset.f === filter;
+        c.classList.toggle('selected', on);
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
-    render();
+
+    // Visibility only — called at the invisible midpoint of the crossfade so
+    // the resulting reflow is never seen.
+    function applyVisibility() {
+      const shown = {};
+      cards.forEach((el) => {
+        const on = matchesFilter(byId[el.dataset.card] || {}, filter);
+        el.classList.toggle('lib-off', !on);
+        if (on) shown[el.dataset.cat] = true;
+      });
+      heads.forEach((h) => { h.classList.toggle('lib-off', !shown[h.dataset.cat]); });
+    }
+
+    // One timeline: fade the list out, swap visibility at zero opacity, fade
+    // back in. Only `opacity` animates — never a layout property.
+    function applyFilter(next) {
+      if (next === filter) return;
+      filter = next;
+      paintChips();               // immediate, eased by .chip's own transition
+      haptic(6);
+      clearTimeout(fadeTimer);
+      if (!HALF) { applyVisibility(); return; }
+      listNodes.forEach((n) => {
+        n.style.willChange = 'opacity';
+        n.style.transition = `opacity ${HALF}ms ${EASE}`;
+        n.style.opacity = '0';
+      });
+      fadeTimer = setTimeout(() => {
+        applyVisibility();
+        // Two frames so nodes leaving display:none have a settled opacity:0 to
+        // transition FROM — otherwise the browser skips the fade and they pop.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          listNodes.forEach((n) => { n.style.opacity = '1'; });
+          fadeTimer = setTimeout(() => {
+            listNodes.forEach((n) => { n.style.willChange = ''; n.style.transition = ''; });
+          }, HALF + 40);
+        }));
+      }, HALF);
+    }
+
+    paintChips();
+    document.getElementById('back-btn').onclick = () => go('home');
+    chips.forEach((b) => { b.onclick = () => applyFilter(b.dataset.f); });
+    document.querySelectorAll('[data-play]').forEach((b) => b.onclick = () => {
+      const p = byId[+b.dataset.play];
+      if (p.locked) return upgradeModal(`"${p.title}" is part of AURA Pro. Unlock every program plus deep analytics.`);
+      sessionSetup(p);
+    });
   };
 
   // ================= 12 SESSION SETUP =================
@@ -1251,7 +1375,7 @@
       <div class="overline" style="margin-bottom:12px">Ambience</div>
       <div class="glass" style="padding:6px 18px 18px;margin-bottom:24px">
         <div style="display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--hairline-soft)">
-          <span style="width:7px;height:7px;border-radius:50%;background:${isLight ? '#F59E0B' : '#A78BFA'};box-shadow:0 0 10px ${isLight ? '#F59E0B' : '#A78BFA'}"></span>
+          <span id="ambience-dot" style="width:7px;height:7px;border-radius:50%;background:${isLight ? '#F59E0B' : '#A78BFA'};box-shadow:0 0 10px ${isLight ? '#F59E0B' : '#A78BFA'}"></span>
           <span style="flex:1;font-size:14px">Appearance</span>
           <span style="display:flex;gap:6px" id="mode-seg" role="radiogroup" aria-label="Appearance">
             ${['dark', 'light'].map((mo) => `<button class="chip ${Theme.mode === mo ? 'selected' : ''}" data-mode="${mo}" role="radio" aria-checked="${Theme.mode === mo}" style="padding:7px 16px;font-size:12px;text-transform:capitalize">${mo}</button>`).join('')}
@@ -1285,14 +1409,34 @@
       });
       haptic(6);
     });
-    // Appearance: instant-but-smooth global switch, persisted with prefs
-    document.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => {
+    // Appearance: instant-but-smooth global switch, persisted with prefs.
+    // Theme.set() fades #app out, swaps the token set and fades back in, so
+    // every CSS-variable-driven surface repaints for free. The two values that
+    // were baked into this screen's markup as literals (the ambience dot and
+    // the slider value colour) are patched on their existing nodes while the
+    // app is invisible — the screen itself is never rebuilt, so the theme
+    // crossfade is no longer followed by a second full-screen jolt.
+    const modeChips = Array.prototype.slice.call(document.querySelectorAll('[data-mode]'));
+    modeChips.forEach((b) => b.onclick = () => {
       if (b.dataset.mode === Theme.mode) return;
       Theme.set(b.dataset.mode, true);
       save({ mode: b.dataset.mode });
       haptic(6);
-      // re-render after the crossfade so orb + accents pick up light physics
-      setTimeout(() => routes.settings(), 300);
+      modeChips.forEach((c) => {
+        const on = c.dataset.mode === b.dataset.mode;
+        c.classList.toggle('selected', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      const light = b.dataset.mode === 'light';
+      setTimeout(() => {
+        const dot = document.getElementById('ambience-dot');
+        if (dot) {
+          dot.style.background = light ? '#F59E0B' : '#A78BFA';
+          dot.style.boxShadow = `0 0 10px ${light ? '#F59E0B' : '#A78BFA'}`;
+        }
+        const tv = document.getElementById('theme-val');
+        if (tv) tv.style.color = light ? '#0891B2' : '#A5F3FC';
+      }, 140);
     });
     attachSlider(document.getElementById('theme-slider'), {
       onMove: (v) => {
