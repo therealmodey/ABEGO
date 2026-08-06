@@ -53,8 +53,8 @@ INSERT OR IGNORE INTO notification_rules (id, name, trigger, body, sent, open_ra
   (1, 'Evening unwind',      'stress > 0.7 · 7-10pm',          'Your evening wind-down is ready. 5 minutes to a calmer night.', 82400, 48, 1),
   (2, 'Sleep prep',          'pre-sleep window · no session',  'Twilight Descent is queued for tonight.',                       41800, 52, 1),
   (3, 'Morning intent',      'wake window · streak > 3',       'Set your intention. Start today grounded.',                      24600, 38, 1),
-  (4, 'Streak protect',      'streak at risk · 8pm',           'Keep your streak alive — one short session before bed.',         12100, 61, 1),
-  (5, 'Weekly insight',      'sunday 6pm',                     'Your week in breaths — see your progress.',                      9400, 44, 1),
+  (4, 'Streak protect',      'streak at risk · 8pm',           'Keep your streak alive with one short session before bed.',         12100, 61, 1),
+  (5, 'Weekly insight',      'sunday 6pm',                     'Your week in breaths. See your progress.',                      9400, 44, 1),
   (6, 'Program suggestion',  'AI match > 0.8',                 'A journey matched to your pattern is ready.',                    7200, 42, 1),
   (7, 'Comeback',            'inactive 7d',                    'Your calm is waiting. Pick up where you left off.',              5800, 18, 0),
   (8, 'Premium teaser',      'free · 10+ sessions',            'Unlock every journey with AURA Plus.',                           4100, 22, 0);

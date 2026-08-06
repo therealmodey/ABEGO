@@ -582,7 +582,7 @@
     return rows.map(a => `
       <div class="scc-activity-row">
         ${dot(a.action && a.action.includes('fail') ? BAD : ACCENT_C)}
-        <span class="scc-activity-what"><strong>${esc(a.email || 'unknown')}</strong> — ${esc(a.action)}${a.meta_json ? ` <em>${esc(a.meta_json)}</em>` : ''}</span>
+        <span class="scc-activity-what"><strong>${esc(a.email || 'unknown')}</strong> · ${esc(a.action)}${a.meta_json ? ` <em>${esc(a.meta_json)}</em>` : ''}</span>
         <span class="scc-activity-when scc-mono">${fmtDate(a.created_at)}</span>
       </div>`).join('');
   }
@@ -633,7 +633,7 @@
             ${m.aiEvents.map(ev => `
               <div class="scc-activity-row">
                 ${dot(evColor[ev.c] || ACCENT_C, true)}
-                <span class="scc-activity-what"><strong>${esc(ev.t)}</strong> — ${esc(ev.d)}</span>
+                <span class="scc-activity-what"><strong>${esc(ev.t)}</strong> · ${esc(ev.d)}</span>
                 <span class="scc-activity-when scc-mono">${esc(ev.ago)}</span>
               </div>`).join('')}
           </div>
@@ -780,7 +780,7 @@
       <div class="scc-grid-141">
         <div class="scc-stack">
           <div class="scc-card scc-card--glow">
-            ${cardHead('Adaptation tuning', 'Model behaviour weights — publish to roll out',
+            ${cardHead('Adaptation tuning', 'Model behaviour weights. Publish to roll out',
               `<div style="display:flex;gap:8px"><button class="scc-btn" id="ai-reset">Reset</button><button class="scc-btn scc-btn--violet" id="ai-publish" style="background:linear-gradient(90deg,${ACCENT_V},${ACCENT_C});color:#fff;border:none">Publish</button></div>`)}
             <div id="ai-sliders">${m.sliders.map(sliderRow).join('')}</div>
           </div>
@@ -840,7 +840,7 @@
     document.querySelectorAll('.scc-flag-row input[data-tg]').forEach(inp => {
       inp.onchange = async () => {
         state.flags[inp.dataset.tg] = !!inp.checked;
-        try { await api.put('/admin/scc/ai', { flags: { [inp.dataset.tg]: !!inp.checked } }); Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; }); toast('Flag saved — live for all users', 'ok'); }
+        try { await api.put('/admin/scc/ai', { flags: { [inp.dataset.tg]: !!inp.checked } }); Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; }); toast('Flag saved and live for all users', 'ok'); }
         catch (e) { inp.checked = !inp.checked; toast('Save failed', 'warn'); }
       };
     });
@@ -851,7 +851,7 @@
       try {
         await api.put('/admin/scc/ai', { sliders: state.sliders, flags: state.flags });
         Object.keys(sccCache).forEach(k => { if (k.startsWith('ai:')) delete sccCache[k]; });
-        toast('Published — new weights are live', 'ok');
+        toast('Published. New weights are live', 'ok');
         views.ai();
       } catch (e) { toast('Publish failed', 'warn'); }
     };
@@ -958,7 +958,7 @@
 
       <div class="scc-grid-151">
         <div class="scc-card scc-card--glow">
-          ${cardHead('Heart rate — session start vs end', 'Wearable-connected users · 14 days',
+          ${cardHead('Heart rate: session start vs end', 'Wearable-connected users · 14 days',
             `<div class="scc-legend"><span>${dot(BAD)} Session start</span><span>${dot(GOOD)} Session end</span></div>`)}
           ${lineChartM([{ data: m.hr.start, color: BAD, area: true }, { data: m.hr.end, color: GOOD }], 620, 200, m.hr.labels)}
         </div>
@@ -1188,7 +1188,7 @@
     if (promote) promote.onclick = async () => {
       const ok = await confirmModal('Promote winner?', `Variant B of ${f.id} will roll out to 100% of users.`, 'Promote', false);
       if (!ok) return;
-      try { await api.put(`/admin/scc/experiments/${f.id}`, { status: 'Complete', winner: 'B' }); toast(`${f.id} promoted — variant B rolled out`, 'ok'); expRefresh(); }
+      try { await api.put(`/admin/scc/experiments/${f.id}`, { status: 'Complete', winner: 'B' }); toast(`${f.id} promoted. Variant B is rolled out`, 'ok'); expRefresh(); }
       catch (e) { toast('Promote failed', 'warn'); }
     };
     const pause = document.getElementById('exp-pause');
@@ -1213,7 +1213,7 @@
         if (!name) { toast('Name required', 'warn'); return; }
         try {
           const { data } = await api.post('/admin/scc/experiments', { name, variants });
-          modal.close(); toast(`${data.id || 'Experiment'} created — now recruiting`, 'ok'); expRefresh();
+          modal.close(); toast(`${data.id || 'Experiment'} created and now recruiting`, 'ok'); expRefresh();
         } catch (e) { toast(e.response?.data?.error || 'Create failed', 'warn'); }
       };
     };
@@ -1255,7 +1255,7 @@
 
       <div class="scc-grid-151">
         <div class="scc-card scc-card--glow">
-          ${cardHead('Rule builder', 'Behavioural trigger — evening unwind',
+          ${cardHead('Rule builder', 'Behavioural trigger: evening unwind',
             `<div style="display:flex;gap:8px"><button class="scc-btn" id="nr-test">Test</button><button class="scc-btn" id="nr-activate" style="background:linear-gradient(90deg,${ACCENT_V},${ACCENT_C});color:#fff;border:none">Activate rule</button></div>`)}
           ${ruleBlock('When', 'rgba(245,158,11,0.4)', '#FCD34D', [
             `${pill('stress_level')} ${op('>')} ${val('0.70')} ${kw('and')} ${pill('last_session')} ${op('>')} ${val('18 hrs ago')}`,
@@ -1302,7 +1302,7 @@
         try {
           await api.put(`/admin/scc/notifications/${id}`, { enabled: !!inp.checked });
           Object.keys(sccCache).forEach(k => { if (k.startsWith('notifications:')) delete sccCache[k]; });
-          toast('Rule ' + (inp.checked ? 'enabled — sending resumes' : 'disabled — sending stopped'), 'ok');
+          toast('Rule ' + (inp.checked ? 'enabled, sending resumes' : 'disabled, sending stopped'), 'ok');
         } catch (e) { inp.checked = !inp.checked; toast('Save failed', 'warn'); }
       };
     });
@@ -1317,7 +1317,7 @@
           body: 'Your evening looks tense. 5 minutes of 4-7-8 usually brings you back down.',
           enabled: true,
         });
-        toast('Rule activated — now live in Active rules', 'ok'); nrRefresh();
+        toast('Rule activated. It is now live in Active rules', 'ok'); nrRefresh();
       } catch (e) { toast(e.response?.data?.error || 'Activation failed', 'warn'); }
     };
     const tst = document.getElementById('nr-test');
@@ -1853,7 +1853,7 @@
     document.querySelectorAll('[data-ua]').forEach(btn => btn.onclick = async () => {
       const a = ACTIONS[btn.dataset.ua];
       if (!a || !selU) return;
-      const yes = await confirmModal(a.t, `${selU.email} — ${a.b}`, a.t, !!a.danger);
+      const yes = await confirmModal(a.t, `${selU.email}: ${a.b}`, a.t, !!a.danger);
       if (!yes) return;
       try {
         if (a.m === 'delete') await api.delete(a.url(selU.id));
@@ -1890,7 +1890,7 @@
           <div style="display:flex;flex-direction:column;gap:12px;font-size:12px">
             <div class="scc-kv"><span>Environment</span><b class="scc-mono" style="color:${GOOD}">Production · local D1</b></div>
             <div class="scc-kv"><span>Model rollout</span><b class="scc-mono">aura-2.4.1 · 82%</b></div>
-            <div class="scc-kv"><span>Theme</span><b>${Theme.mode === 'light' ? 'Light' : 'Dark'} — toggle in the topbar</b></div>
+            <div class="scc-kv"><span>Theme</span><b>${Theme.mode === 'light' ? 'Light' : 'Dark'}, toggle in the topbar</b></div>
             <div class="scc-kv"><span>Signed in as</span><b class="scc-mono">${esc(me?.email || '')}</b></div>
             <div class="scc-kv"><span>Session</span><b>JWT · Bearer, 7-day expiry</b></div>
           </div>
@@ -1936,7 +1936,7 @@
             <div class="scc-mono scc-cell-3" style="font-size:11px">${esc(l.target_type)} #${l.target_id ?? '—'}</div>
             <div class="scc-cell-2" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(detail(l.detail_json))}</div>
             <div class="scc-mono scc-cell-3" style="font-size:11px;text-align:right">${esc(l.ip || '—')}</div>
-          </div>`).join('') : '<p class="scc-empty">No audit entries yet — privileged actions will appear here.</p>'}
+          </div>`).join('') : '<p class="scc-empty">No audit entries yet. Privileged actions will appear here.</p>'}
       </div>
     `);
 

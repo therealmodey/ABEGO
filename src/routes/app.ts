@@ -185,7 +185,7 @@ app.post('/moods', async (c) => {
     const recent = await c.env.DB.prepare(
       "SELECT AVG(calm_score) AS s FROM sessions WHERE user_id = ? AND completed = 1 AND started_at > datetime('now','-7 days')"
     ).bind(u.sub).first<{ s: number | null }>()
-    if (recent?.s != null && recent.s < 55) { plan.minutes += 2; plan.reason += ' · extended — recent calm trending low' }
+    if (recent?.s != null && recent.s < 55) { plan.minutes += 2; plan.reason += ' · extended, recent calm trending low' }
   }
   // exploration: deterministic per user/day bucket tries a gentle variant
   const dayOfYear = Math.floor((Date.now() - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 86400000)
@@ -242,9 +242,9 @@ app.get('/stats', async (c) => {
       `SELECT AVG(calm_score) AS s FROM sessions WHERE user_id = ? AND completed = 1 AND CAST(strftime('%H', started_at) AS INT) < 20`
     ).bind(u.sub).first<{ s: number | null }>()
     if ((evening?.s ?? 0) > (daytime?.s ?? 0) && evening?.s) {
-      insight = "Your calmest sessions happen after 8pm. Try shifting your practice later — we'll queue a gentler pace to match."
+      insight = "Your calmest sessions happen after 8pm. Try shifting your practice later and we'll queue a gentler pace to match."
     } else if (streak >= 3) {
-      insight = `You're on a ${streak}-day streak. Consistency is compounding — your average calm score is up ${Math.max(calmDelta, 0)} points this week.`
+      insight = `You're on a ${streak}-day streak. Consistency is compounding. Your average calm score is up ${Math.max(calmDelta, 0)} points this week.`
     } else {
       insight = 'Short, regular sessions beat long, rare ones. Try a 3-minute session at the same time each day.'
     }

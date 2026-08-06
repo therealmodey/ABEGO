@@ -48,10 +48,10 @@ ${fonts}
 </body>
 </html>`
 
-app.get('/', (c) => c.html(shell('AURA — Breathe with intention', 'app.js', 'aura-app')))
-app.get('/pricing', (c) => c.html(shell('AURA — Simple, Transparent Pricing', 'pricing.js', 'aura-pricing')))
-app.get('/billing', (c) => c.html(shell('AURA — Billing', 'billing.js', 'aura-billing')))
-app.get('/admin', (c) => c.html(shell('AURA — Admin', 'admin.js', 'aura-admin')))
-app.get('/admin/*', (c) => c.html(shell('AURA — Admin', 'admin.js', 'aura-admin')))
+app.get('/', (c) => c.html(shell('AURA · Breathe with intention', 'app.js', 'aura-app')))
+app.get('/pricing', (c) => c.html(shell('AURA · Simple, Transparent Pricing', 'pricing.js', 'aura-pricing')))
+app.get('/billing', (c) => c.html(shell('AURA · Billing', 'billing.js', 'aura-billing')))
+app.get('/admin', (c) => c.html(shell('AURA · Admin', 'admin.js', 'aura-admin')))
+app.get('/admin/*', (c) => c.html(shell('AURA · Admin', 'admin.js', 'aura-admin')))
 
 export default app
