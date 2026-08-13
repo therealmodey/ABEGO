@@ -78,10 +78,16 @@
   // still valid — every API call keeps working, but the guard would bounce
   // the user to welcome. Probe /auth/me once before giving up.
   let authProbe = null; // null = not tried, 'pending' = in flight, 'done' = resolved
+  let routeParams = {};
   function route() {
-    const h = (location.hash || '#splash').slice(1).split('?')[0];
+    const raw = (location.hash || '#splash').slice(1);
+    const h = raw.split('?')[0];
+    // Expose query params (e.g. #reset?token=…) to route handlers so a reset
+    // link delivered by email can carry its token through to the screen.
+    const q = raw.includes('?') ? new URLSearchParams(raw.slice(raw.indexOf('?') + 1)) : new URLSearchParams();
+    routeParams = Object.fromEntries(q.entries());
     const user = AuraState.user;
-    const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'how', ''];
+    const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'forgot', 'forgotSent', 'reset', 'resetSuccess', 'verify', 'verifySuccess', 'how', ''];
     if (!user && !publicRoutes.includes(h)) {
       if (authProbe === 'pending') return; // probe will re-route when it lands
       if (authProbe === null) {
@@ -200,7 +206,11 @@
         <p style="font-size:11px;letter-spacing:6px;color:var(--text-tertiary);margin-top:12px;text-transform:uppercase">breathe · restore</p>
       </div>
     </section>`;
-    setTimeout(() => { go(AuraState.user ? 'home' : 'welcome'); }, 1800);
+    // Honor a deep-linked auth route (e.g. a bookmarked #login / #signup)
+    // for unauthenticated visitors instead of forcing them to welcome.
+    const deep = (location.hash || '').slice(1).split('?')[0];
+    const authDeep = ['login', 'signup', 'forgot', 'reset', 'verify'].includes(deep);
+    setTimeout(() => { go(AuraState.user ? 'home' : (authDeep ? deep : 'welcome')); }, 1800);
   };
 
   // ================= 01 WELCOME =================
@@ -267,8 +277,6 @@
       }
     };
   }
-  routes.login = () => authScreen('login');
-  routes.signup = () => authScreen('signup');
 
   // ================= 02 HOW IT WORKS =================
   routes.how = function () {
@@ -1394,9 +1402,23 @@
         <input type="range" min="0" max="100" value="${prefs.theme}" class="aura-slider" id="theme-slider" aria-label="Theme intensity">
       </div>
       <a href="/pricing" class="btn-ghost">${icon('spark', 16)} ${u.plan === 'free' ? 'Upgrade to AURA Plus' : 'Manage plan'}</a>
+
+      <div class="overline" style="margin:28px 0 12px">Account</div>
+      <div class="glass" style="overflow:hidden">
+        <button class="sec-row" id="goto-security" style="width:100%;border:none;background:transparent">
+          <span class="sec-ic">${icon('lock', 16)}</span>
+          <span style="flex:1">
+            <span class="sec-label" style="display:block">Account &amp; Security</span>
+            <span class="sec-detail">Password, devices, data &amp; deletion</span>
+          </span>
+          ${icon('arrow', 16)}
+        </button>
+      </div>
     </section>`;
     document.getElementById('back-btn').onclick = () => go('home');
     document.getElementById('profile-card').onclick = () => go('profile');
+    const secBtn = document.getElementById('goto-security');
+    if (secBtn) secBtn.onclick = () => go('security');
     document.querySelectorAll('[data-pref]').forEach((t) => t.onclick = () => {
       const k = t.dataset.pref;
       if (k === 'adaptive' && u.plan === 'free') return upgradeModal('Adaptive pacing learns your rhythm and adjusts each session. It comes with AURA Pro.');
@@ -1454,5 +1476,5 @@
   };
 
   route(); // boot
-  window.AuraApp = { routes, go, ob, startSession };
+  window.AuraApp = { routes, go, ob, startSession, get routeParams() { return routeParams; } };
 })();

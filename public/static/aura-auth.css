@@ -1,0 +1,159 @@
+/* ================================================================
+   AURA — Authentication & Account security surface
+   (design handoff: AURA · Authentication & Account Management)
+   Reuses tokens/classes from aura.css; adds the auth-specific atoms.
+   ================================================================ */
+
+/* ---- Auth input (glass pill, 4 visual states) ---- */
+.auth-field { margin-bottom: 14px; }
+.auth-label {
+  display: block; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); font-weight: 500; margin-bottom: 8px; padding-left: 4px;
+}
+.auth-input {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: none;
+  transition: border-color 400ms var(--ease), box-shadow 400ms var(--ease);
+}
+.auth-input.focus  { border-color: rgba(124,58,237,0.55); box-shadow: 0 0 0 3px rgba(124,58,237,0.15), 0 0 20px rgba(124,58,237,0.20); }
+.auth-input.error  { border-color: rgba(248,113,113,0.55); box-shadow: 0 0 0 3px rgba(248,113,113,0.12), 0 0 20px rgba(248,113,113,0.18); }
+.auth-input.success{ border-color: rgba(52,211,153,0.55); box-shadow: 0 0 0 3px rgba(52,211,153,0.12), 0 0 20px rgba(52,211,153,0.18); }
+.auth-input input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  color: #fff; font-size: 15px; letter-spacing: 0.1px; font-family: var(--font);
+}
+.auth-input input::placeholder { color: rgba(255,255,255,0.40); }
+.auth-input .auth-hint {
+  display: flex; align-items: center; gap: 6px; padding-left: 4px;
+  font-size: 11px; line-height: 1.4; color: rgba(255,255,255,0.5);
+  margin-top: 8px; transition: opacity 300ms ease;
+}
+.auth-input .auth-hint.error { color: #F87171; }
+
+/* Eye toggle (32x32 rounded-10 trailing) */
+.auth-eye {
+  width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid rgba(255,255,255,0.06);
+  transition: all 300ms ease; cursor: pointer;
+}
+.auth-eye.on { background: rgba(124,58,237,0.15); border-color: rgba(124,58,237,0.30); }
+
+/* Caps lock hint pill */
+.auth-capshint {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 9999px;
+  background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.30);
+  font-size: 10px; color: #F59E0B; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 500;
+}
+
+/* ---- Password strength meter ---- */
+.pw-meter { display: flex; gap: 6px; margin-top: 14px; }
+.pw-seg {
+  flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08);
+  transition: all 400ms var(--ease);
+}
+.pw-level { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.pw-level .lbl { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.55); font-weight: 500; }
+.pw-level .val { font-size: 12px; font-weight: 500; }
+.pw-req { display: flex; flex-direction: column; gap: 8px; padding-left: 2px; margin-top: 12px; }
+.pw-req .row { display: flex; align-items: center; gap: 8px; font-size: 11px; transition: color 300ms ease; }
+.pw-req .bub {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 300ms ease;
+}
+.pw-breach {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.30);
+  font-size: 11px; color: #F59E0B; line-height: 1.4; margin-top: 12px;
+}
+
+/* ---- Verification code dots ---- */
+.code-dots { position: relative; display: flex; gap: 8px; justify-content: center; }
+.code-dot {
+  width: 42px; height: 52px; border-radius: 12px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10); backdrop-filter: blur(20px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 500; color: #fff;
+  font-family: ui-monospace, Menlo, monospace; transition: all 300ms ease;
+}
+.code-dot.filled { border-color: rgba(255,255,255,0.24); }
+.code-dot.active { border-color: rgba(124,58,237,0.55); box-shadow: 0 0 0 3px rgba(124,58,237,0.15), 0 0 16px rgba(124,58,237,0.20); }
+.code-input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; border: none; outline: none; background: transparent;
+  font-size: 16px; letter-spacing: 30px; text-indent: 18px; color: transparent;
+  caret-color: transparent;
+}
+
+/* ---- Warning / info cards (4 tones) ---- */
+.warn-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 14px; }
+.warn-card .ic { width: 30px; height: 30px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.warn-card .t { font-size: 13px; font-weight: 500; color: #fff; margin-bottom: 3px; }
+.warn-card .b { font-size: 12px; color: rgba(255,255,255,0.65); line-height: 1.5; }
+
+/* ---- Step pips (delete-account 3-step) ---- */
+.step-pips { display: flex; gap: 4px; justify-content: center; }
+.step-pip { width: 6px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); transition: all 300ms var(--ease); }
+.step-pip.active { width: 20px; background: linear-gradient(90deg, #F87171, #A78BFA); box-shadow: 0 0 8px rgba(248,113,113,0.4); }
+.step-pip.dim { opacity: 0.5; }
+
+/* ---- Orb badge chip (key / mail / lock on the orb) ---- */
+.orb-badge {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 2px solid #0B0F1A;
+}
+
+/* ---- Danger + success CTAs (gradient pills) ---- */
+.btn-danger {
+  background: linear-gradient(135deg, #F87171, #EF4444);
+  box-shadow: 0 8px 32px rgba(239,68,68,0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+  color: #fff;
+}
+.btn-success-cta {
+  background: linear-gradient(135deg, #34D399, #22D3EE);
+  box-shadow: 0 8px 32px rgba(52,211,153,0.35);
+  color: #fff;
+}
+.btn-ghost.danger { border-color: rgba(248,113,113,0.30); color: #F87171; }
+
+/* ---- Settings rows reused in Account & Security ---- */
+.sec-row {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.06); cursor: pointer;
+}
+.sec-row:last-child { border-bottom: none; }
+.sec-ic {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+}
+.sec-row .sec-label { flex: 1; font-size: 15px; font-weight: 500; color: #fff; }
+.sec-row .sec-detail { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.sec-row .sec-danger { color: #F87171; }
+
+/* ---- Sign-out-everywhere device list ---- */
+.dev-list { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; overflow: hidden; margin-bottom: 20px; }
+.dev-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.dev-row:last-child { border-bottom: none; }
+.pill-kept {
+  padding: 2px 6px; border-radius: 4px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; font-weight: 500;
+  background: rgba(52,211,153,0.15); color: #34D399; border: 1px solid rgba(52,211,153,0.35);
+}
+
+/* ---- Farewell orb (desaturated) ---- */
+.orb-farewell { opacity: 0.55; filter: saturate(0.4); }
+
+/* ---- Account & security profile card (reuses .glass) ---- */
+.profile-card { display: flex; align-items: center; gap: 12px; padding: 16px; }
+.verified-pill {
+  padding: 3px 8px; border-radius: 6px; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 500;
+  background: rgba(52,211,153,0.15); color: #34D399; border: 1px solid rgba(52,211,153,0.35);
+}

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import authRoutes from './routes/auth'
 import appRoutes from './routes/app'
+import accountRoutes from './routes/account'
 import billingRoutes from './routes/billing'
 import adminRoutes from './routes/admin'
 import { type AppEnv, corsOrigin, securityHeaders } from './lib/middleware'
@@ -20,6 +21,7 @@ app.use('/api/*', (c, next) =>
 
 // ---------- API ----------
 app.route('/api/auth', authRoutes)
+app.route('/api/account', accountRoutes)
 app.route('/api/app', appRoutes)
 app.route('/api/billing', billingRoutes)
 app.route('/api/admin', adminRoutes)
@@ -39,12 +41,14 @@ const shell = (title: string, script: string, bodyId: string) => `<!DOCTYPE html
 ${fonts}
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link href="/static/aura.css" rel="stylesheet">
+<link href="/static/aura-auth.css" rel="stylesheet">
 </head>
 <body id="${bodyId}">
-<main id="app" class="app-root"><div class="boot-loader"><div class="boot-orb"></div></div></main>
+<main id="app" class="app-root"><div class="boot-loader"><div class="boot-orb"></div></main>
 <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
 <script src="/static/aura-core.js"></script>
 <script src="/static/${script}"></script>
+<script src="/static/aura-auth.js"></script>
 </body>
 </html>`
 
