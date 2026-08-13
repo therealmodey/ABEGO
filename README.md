@@ -8,7 +8,7 @@ A production-ready guided-breathing SaaS built from the 25-artboard AURA design 
 - **Design fidelity**: Exact tokens honored — bg `#0B0F1A`, brand `#7C3AED→#22D3EE`, phase colors `#60A5FA / #A78BFA / #34D399`, 4000ms breathe transitions, glassmorphism, amber-only errors.
 
 ## URLs
-- **Sandbox (dev)**: https://3000-ia43ccw2kmvyc6mb46wnh-82b888ba.sandbox.novita.ai
+- **Local dev**: `npm install && npm run dev` → http://localhost:5173 (the sandbox above is no longer reachable; run locally to exercise the current code, including the Authentication & Account Security flow)
 - **Production**: not yet deployed (see Deployment below)
 - **Pages**: `/` (app SPA) · `/pricing` · `/billing` · `/admin`
 - **Health**: `GET /api/health`
@@ -125,7 +125,7 @@ npm test                                                   # UI suites + securit
 
 ## Deployment
 - **Platform**: Cloudflare Pages (not yet deployed to production)
-- **Status**: ✅ Active in sandbox (PM2 + wrangler pages dev, local D1)
+- **Status**: not deployed to a live environment; run locally with `npm run dev` (the previous sandbox instance is no longer reachable and was not kept in sync with `main`)
 - **Tech Stack**: Hono 4 + TypeScript + Cloudflare D1 + vanilla-JS SPA + hand-rolled design-token CSS
 
 ## Premium Interaction Layer (2026-07-17)
