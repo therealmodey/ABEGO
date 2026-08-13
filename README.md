@@ -33,6 +33,7 @@ Regular users sign up through the app at `/`.
 ## Currently Completed Features
 ### Core product
 - Signup / login / logout / me — PBKDF2 (100k iters) + HS256 JWT (Web Crypto only, Workers-safe), httpOnly cookie + Bearer; logout revokes the token server-side
+- Full auth flow: email verification (dev code in dev), forgot → reset (token-from-URL works from emailed links), change password (signs out other devices), and a complete **Account & Security** surface (sign out everywhere, export data, delete account with 3-step confirmation)
 - 18-screen SPA replicating the design: splash → welcome → auth → onboarding (how-it-works, personalize, permissions) → home with liquid orb → session engine (inhale/hold/exhale state machine, pause veil, completion stats) → mood check-in → stats → programs → session setup sheet → history → profile → settings
 - Breathing session engine: 1s tick, phase-colored orb morphing, progress ring, cycle tracking
 - Mood check-ins with rule-based AI: anxious→4-7-8, calm→box, tired→6-2-4 energizing, focused→coherent 5-0-5, with evening pace adaptation
@@ -45,6 +46,16 @@ Regular users sign up through the app at `/`.
 - Admin console at `/admin`: Dashboard (KPIs, plan distribution, 14-day signup chart), Users (search, paginate, promote/demote/suspend/reactivate/delete with confirmation modals), Analytics, Content (program toggles), Audit logs
 - Safety rails: can't change own role, can't demote last admin, admins can't be suspended/deleted, soft-delete with email mangling; role change / suspend / delete invalidate the target's sessions immediately
 - Every admin action audited (action, target, detail JSON, IP); user activity logged
+
+### Account & Security (Part 3)
+- **Email verification**: signup returns `requiresVerification`; `/auth/verify/send` + `/auth/verify/confirm` (unauthenticated), `users.email_verified` gate
+- **Password reset**: `/auth/forgot` issues a reset token; `/auth/reset` consumes it. Reset links carry the token in the URL (`#reset?token=…`), so an emailed link lands directly on the reset screen — no dead-end
+- **Change password** (`/account/password`, authed): re-authenticates current password, updates hash, and bumps `token_version` to sign out every other device while keeping the current one
+- **Sign out everywhere** (`/account/sign-out-others`): revokes all sessions except the current one (token-version bump)
+- **Export data** (`/account/export`): queues a secure archive (session history, biometrics, preferences, insights) emailed to the user
+- **Delete account** (`/account/delete/verify` → `/account/delete/confirm`): 3-step confirmation (warn → confirm password + acknowledge export → type `DELETE`), hard-deletes the user and cascades
+- **Frontend**: 17 vanilla-JS screens registered on `window.AuraApp.routes` (login, signup, forgot, forgotSent, reset, resetSuccess, verify, verifySuccess, security, dataPrivacy, changePassword, signOutAll, exportData, deleteWarn, deleteConfirm, deleteFinal, deleteSuccess) — every screen has a forward CTA and a safe exit, no dead ends
+- Backed by migration `0006_account_security.sql` (email_verified, verify/reset code tables, sessions registry, export requests)
 - Rate limiting: signup 10/5min, login 15/5min, checkout 10/min, admin surface 120/min
 
 ### Monetization (Part 3)
@@ -282,7 +293,7 @@ New `POST /api/admin/reset` (behind the existing `requireAuth` + `requireAdmin` 
 - **User data is never touched**: `users`, `sessions`, `moods`, `subscriptions`, `payments`, `profiles` and the (contractually immutable) `audit_log` are all preserved; the response echoes the preserved list. The only deletes remove rules/experiments added *beyond* the baseline.
 - **Functionality intact**: the cache is invalidated so the next read serves restored values, the view re-renders, the button re-enables on failure, and the pre-existing per-module AI reset still works.
 
-**Validation**: `npm test` → **242/242 pass** (41 + 13 + 97 existing, plus 91 new in `tests/layout-stability.test.mjs`). The new suite parses the stylesheet rule-by-rule rather than grepping, so a rule that merely *mentions* a property cannot satisfy a check. It asserts cross-browser scrollbar hiding, that scroll is never disabled, that every full-height container uses `--vh-fixed`, that no `dvh`/`100vw` remains, that `.screen--scroll` never overrides width, that no keyframe animates layout, and 30+ admin-reset safety invariants. The reset was additionally verified **live against D1**: mutate → reset → confirm defaults restored, zero nulls, user count unchanged, second reset idempotent, and writes still working afterwards.
+- **Validation**: `npm test` → **298 checks pass, 0 fail** across `tests/copy-style.test.mjs` (23), `tests/security-critical.test.mjs` (16), `tests/security-hardening.test.mjs` (17), the layout-stability suite (91), and the existing unit/integration suites (41 + 13 + 97). The layout-stability suite parses the stylesheet rule-by-rule rather than grepping, so a rule that merely *mentions* a property cannot satisfy a check. It asserts cross-browser scrollbar hiding, that scroll is never disabled, that every full-height container uses `--vh-fixed`, that no `dvh`/`100vw` remains, that `.screen--scroll` never overrides width, that no keyframe animates layout, and 30+ admin-reset safety invariants. The reset was additionally verified **live against D1**: mutate → reset → confirm defaults restored, zero nulls, user count unchanged, second reset idempotent, and writes still working afterwards.
 
 ## Security Hardening (2026-08-05)
 Two review-driven passes (PRs #4 and #5). **No screen, copy or layout changed** — the
@@ -319,12 +330,12 @@ Copy `.dev.vars.example` → `.dev.vars` to get started locally.
 
 ### Deliberately not done yet
 - **CSP** — the frontend renders inline styles via `innerHTML` and loads fonts/axios from CDNs, so a policy needs a per-page visual pass. A test asserts it stays out until then.
-- Admin token still in `localStorage` (XSS-readable); no email verification, password reset or admin 2FA; rate limiting is per-isolate in memory, not global; PBKDF2 at 100k iterations (OWASP now suggests 210k).
-- **Last Updated**: 2026-08-05
+- Admin token still in `localStorage` (XSS-readable); no admin 2FA; rate limiting is per-isolate in memory, not global; PBKDF2 at 100k iterations (OWASP now suggests 210k).
+- **Last Updated**: 2026-08-13
 
 ## Features Not Yet Implemented
 - Real payment-provider round-trip (needs live Stripe/Paystack keys — `ALLOW_SIM_CHECKOUT` covers the flow in dev)
-- Email notifications (receipts, dunning), email verification and password reset
+- Email delivery (verification / reset / export emails): endpoints and UI are wired, but the transactional send still needs a provider (Resend/SendGrid) + key — dev uses inline dev codes/`devResetToken` instead of sending real mail
 - Reminders toggle is persisted but push/local notifications need a service worker + permission flow
 - Team/family plans, proration on mid-cycle upgrades
 
@@ -332,5 +343,5 @@ Copy `.dev.vars.example` → `.dev.vars` to get started locally.
 1. Deploy to Cloudflare Pages with real D1 + secrets
 2. Plug in live Stripe/Paystack keys and register webhook endpoints
 3. Content-Security-Policy (needs a visual pass — see Security Hardening)
-4. Move the admin token out of `localStorage`; add email verification, password reset + transactional email (Resend/SendGrid)
+4. Move the admin token out of `localStorage`; wire transactional email (Resend/SendGrid) so verification / reset / export actually send
 5. Swap the rule-based suggestion engine for an LLM-backed one via an AI API
