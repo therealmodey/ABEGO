@@ -230,7 +230,7 @@
       try {
         const { data } = await api.post('/auth/login', { email: emailEl.value, password: passEl.value });
         AuraState.setToken(data.token); AuraState.user = data.user;
-        if (data.requiresVerification) { flow.verifyEmail = data.user.email; goto('verify'); return; }
+        if (data.requiresVerification) { flow.verifyEmail = data.user.email; flow.devCode = data.devCode; goto('verify'); return; }
         goto(data.user.onboarded ? 'home' : 'how');
       } catch (err) {
         const msg = (err.response && err.response.data && err.response.data.error) || 'Something went wrong.';
@@ -350,7 +350,7 @@
       try {
         const { data } = await api.post('/auth/signup', { email: emailEl.value, password: passEl.value, name: nameEl.value });
         AuraState.setToken(data.token); AuraState.user = data.user;
-        if (data.requiresVerification) { flow.verifyEmail = data.user.email; goto('verify'); return; }
+        if (data.requiresVerification) { flow.verifyEmail = data.user.email; flow.devCode = data.devCode; goto('verify'); return; }
         goto(data.user.onboarded ? 'home' : 'how');
       } catch (err) {
         const msg = (err.response && err.response.data && err.response.data.error) || 'Something went wrong.';
@@ -466,6 +466,7 @@
         </div>
         <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.4px;text-align:center;margin-bottom:6px">Create a new password</h1>
         <p style="font-size:13px;color:var(--text-tertiary);text-align:center;max-width:300px;margin:0 auto 26px;line-height:1.5">Something you'll remember, and no one can guess.</p>
+        ${!App.routeParams.token && flow.resetToken ? `<div style="max-width:320px;margin:0 auto 4px;padding:10px 14px;border:1px dashed rgba(34,211,238,0.5);border-radius:12px;background:rgba(34,211,238,0.07);text-align:center"><div style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:rgba(34,211,238,0.85);margin-bottom:4px">Dev reset token (email not configured)</div><div style="font-size:13px;font-weight:600;color:#fff;word-break:break-all;font-variant-numeric:tabular-nums">${flow.resetToken}</div></div>` : ''}
         <form id="reset-form" style="max-width:360px;width:100%;margin:0 auto">
           <div id="reset-error"></div>
           <div class="auth-field">
@@ -571,6 +572,7 @@
         </div>
         <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.4px;text-align:center;margin-bottom:8px">Verify your email</h1>
         <p style="font-size:14px;color:var(--text-tertiary);text-align:center;line-height:1.55;max-width:300px;margin:0 auto 20px">We sent a 6-digit code to<br><span style="color:#fff;font-weight:500">${email}</span></p>
+        ${flow.devCode ? `<div style="max-width:320px;margin:0 auto 4px;padding:10px 14px;border:1px dashed rgba(34,211,238,0.5);border-radius:12px;background:rgba(34,211,238,0.07);text-align:center"><div style="font-size:11px;letter-spacing:0.4px;text-transform:uppercase;color:rgba(34,211,238,0.85);margin-bottom:4px">Dev code (email not configured)</div><div style="font-size:22px;font-weight:700;letter-spacing:6px;color:#fff;font-variant-numeric:tabular-nums">${flow.devCode}</div></div>` : ''}
         <div id="code-area" style="padding:4px 0 8px">${codeDotsHTML()}</div>
         <div id="verify-error" style="min-height:0"></div>
         <div style="display:flex;flex-direction:column;gap:12px;max-width:340px;margin:18px auto 0">
@@ -592,6 +594,7 @@
       verifyBtn.disabled = true;
       try {
         await api.post('/auth/verify/confirm', { email, code: input.value });
+        flow.devCode = null;
         goto('verifySuccess');
       } catch (err) {
         const msg = (err.response && err.response.data && err.response.data.error) || 'That code is not correct.';
