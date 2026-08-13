@@ -294,7 +294,15 @@ auth.post('/verify/confirm', rateLimit(20, 120, 'verify'), async (c) => {
   if (!row || new Date(row.expires_at).getTime() < Date.now()) {
     return c.json({ error: 'This code has expired. Request a new one.' }, 400)
   }
-  if (row.code !== code) return c.json({ error: 'That code is not correct. Try again.' }, 400)
+  if (row.code !== code) {
+    // Dev bypass: when transactional email is not configured (no RESEND_API_KEY),
+    // accept the universal dev code "000000" so verification is completable on
+    // preview/dev without email. Production (email wired) still enforces the real code.
+    const emailConfigured = !!(c.env as any).RESEND_API_KEY
+    if (!(code === '000000' && !emailConfigured)) {
+      return c.json({ error: 'That code is not correct. Try again.' }, 400)
+    }
+  }
   await c.env.DB.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').bind(user.id).run()
   await c.env.DB.prepare('DELETE FROM auth_codes WHERE purpose = ? AND user_id = ?').bind('verify_email', user.id).run()
   await logActivity(c.env.DB, user.id, 'email_verified', {}, clientIp(c))
