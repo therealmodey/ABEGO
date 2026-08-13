@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "webapp-production",
-      "database_id": "local-placeholder-replace-on-deploy"
+      "database_id": "d1b858ac-d8d4-481d-9cab-9e7956c967fa"
     }
   ]
   // "vars": {
