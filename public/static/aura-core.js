@@ -517,10 +517,19 @@
 
   function handleApiError(err, fallback) {
     const data = err && err.response && err.response.data;
-    if (err && err.response && err.response.status === 402) { upgradeModal(data && data.error); return; }
-    if (err && err.response && err.response.status === 401 && !location.pathname.startsWith('/pricing')) {
+    const status = err && err.response && err.response.status;
+    if (status === 402) { upgradeModal(data && data.error); return; }
+    // 401 (invalid/expired) and 403 (account unavailable / suspended / session
+    // invalidated) both mean the stored session is no longer good — clear it and
+    // return to login so the user isn't stuck on a dead-end error screen.
+    if ((status === 401 || status === 403) && !location.pathname.startsWith('/pricing')) {
       AuraState.clear();
-      if (location.pathname !== '/') location.href = '/';
+      if (location.hash && !['#login', '#signup', '#welcome', '#splash'].includes(location.hash)) {
+        location.hash = '#login';
+      } else if (location.pathname !== '/') {
+        location.href = '/';
+      }
+      return;
     }
     toast((data && data.error) || fallback || 'Something went wrong.');
   }
