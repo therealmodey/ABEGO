@@ -65,7 +65,13 @@ body {
   /* body must NOT declare its own overflow: that would make it a second scroll
      container competing with html and reintroduce inconsistent sizing. */
   -webkit-font-smoothing: antialiased;
+  /* Long copy wraps and never overflows its container (issue: text should
+     break to the next line instead of being clipped / causing h-scroll). */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
+/* Headings balance their lines for a cleaner rag. */
+h1, h2, h3, .overline { text-wrap: balance; }
 button { font-family: var(--font); cursor: pointer; border: none; background: none; color: inherit; }
 input, select { font-family: var(--font); }
 a { color: inherit; text-decoration: none; }
@@ -311,6 +317,14 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
 .tabular { font-variant-numeric: tabular-nums; }
 
 /* ============ Screen container (mobile-first, centers on desktop) ============ */
+@keyframes auraScreenIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.985); filter: blur(3px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes auraScreenOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-12px) scale(0.99); }
+}
 .screen {
   position: relative; z-index: 1;
   /* Identical bounding box on EVERY screen: same max-width, same centring,
@@ -320,7 +334,13 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
   max-width: 480px; margin: 0 auto;
   min-height: var(--vh-fixed);
   display: flex; flex-direction: column;
-  animation: auraFadeIn var(--dur-slow) var(--ease);
+  animation: auraScreenIn var(--dur-slow) var(--ease) both;
+}
+/* Smart-switch exit: the router keeps the leaving node in the DOM just long
+   enough for this to play before the next screen mounts. */
+.screen--leaving { animation: auraScreenOut 200ms var(--ease) both; }
+@media (prefers-reduced-motion: reduce) {
+  .screen, .screen--leaving { animation: auraFadeIn 1ms linear both; }
 }
 .screen--wide { max-width: 1100px; }
 

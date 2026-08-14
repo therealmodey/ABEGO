@@ -115,7 +115,15 @@
     };
     if (leaving && !leaving.classList.contains('screen--leaving')) {
       leaving.classList.add('screen--leaving');
-      setTimeout(renderNext, 200); // overlap: new screen fades in as old finishes
+      // Let the leaving screen play its exit (auraScreenOut), then mount the
+      // next screen which plays its own enter (auraScreenIn) — a smart switch
+      // instead of an instant innerHTML wipe.
+      setTimeout(() => {
+        if (token !== navToken) return; // superseded by a newer navigation
+        renderNext();
+        const old = root.querySelector('.screen--leaving');
+        if (old) setTimeout(() => old.remove(), 220);
+      }, 200);
     } else {
       renderNext();
     }
@@ -381,10 +389,14 @@
       const { data } = await api.post('/app/sessions/start', { inhale: cfg.inhale, hold: cfg.hold, exhale: cfg.exhale, cycles: cfg.cycles, programId: cfg.programId, mood: cfg.mood });
       sessionId = data.sessionId;
     } catch (err) {
+      // 402 = premium gate → surface the upgrade modal, don't start.
       if (err.response && err.response.status === 402) { go('home'); setTimeout(() => upgradeModal(err.response.data.error), 400); return; }
-      handleApiError(err, 'Could not start session.'); go('home'); return;
+      // Any other failure (offline, daily cap, 5xx) must NOT bounce the user to
+      // home with a raw error — fall back to a local session so the breath still
+      // begins. The server will catch up on the next sync.
+      console.warn('[startSession] server start failed, running locally:', err && (err.response && err.response.status || err.message));
     }
-    setTimeout(() => runSession(sessionId, cfg), 1400);
+    setTimeout(() => runSession(sessionId, cfg), sessionId ? 1400 : 350);
   }
 
   function runSession(sessionId, cfg) {
@@ -484,6 +496,9 @@
       clearInterval(S.timer);
       Tone.stop();
       const cyclesDone = finished ? cfg.cycles : Math.max(0, S.cycle - 1);
+      // Local-only session (server start failed) — show the completion screen
+      // without a server round-trip so the flow still lands gracefully.
+      if (S.id == null) { completeScreen(null, S.elapsed); return; }
       try {
         const { data } = await api.post(`/app/sessions/${S.id}/complete`, { cyclesDone, durationSec: S.elapsed });
         completeScreen(data, S.elapsed);

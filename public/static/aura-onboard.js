@@ -120,7 +120,6 @@
     <section class="screen screen--scroll" style="padding:24px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:36px">
         <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
-        <span class="overline">Step 3 of 4</span>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
       </header>
       <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">The rhythm is<br/>simple.</h1>
@@ -238,7 +237,6 @@
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:28px">
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
-          <span class="overline">Step 3 of 4</span>
         </div>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
       </header>
@@ -311,57 +309,13 @@
     });
 
     root.querySelector('[data-back]').onclick = () => goto('liveDemo');
-    root.querySelector('#next-btn').onclick = () => goto('intent');
-    root.querySelector('#skip-btn').onclick = () => goto('intent');
+    root.querySelector('#next-btn').onclick = () => goto('previewRecommend');
+    root.querySelector('#skip-btn').onclick = () => goto('previewRecommend');
   };
 
-  // ================= 7 · INTENT =================
-  App.routes.intent = function () {
-    if (_demoTimer) { clearInterval(_demoTimer); _demoTimer = null; }
-    const intents = [
-      { id: 'ease', label: 'Ease', svg: svgLotus, color: '#34D399', desc: 'to unwind & release tension' },
-      { id: 'clear', label: 'Clear', svg: svgEye, color: '#60A5FA', desc: 'to sharpen & focus' },
-      { id: 'rest', label: 'Rest', svg: svgMoon, color: '#A78BFA', desc: 'to slow down for sleep' },
-    ];
-    root.innerHTML = `${bgHTML()}\n    <section class="screen screen--scroll" id="intent-screen" style="padding:24px">
-      <header style="display:flex;align-items:center;padding-top:16px;margin-bottom:8px">
-        <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
-        <span class="overline" style="flex:1;text-align:center;color:var(--text-tertiary)">WHAT BRINGS YOU HERE</span>
-        <div style="width:40px"></div>
-      </header>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;text-align:center;margin:10px 0 6px">You want to…</h1>
-      <div style="display:flex;flex-direction:column;gap:14px;flex:1;padding:20px 0">
-        ${intents.map((g) => `
-        <button class="glass intent-card" data-intent="${g.id}" aria-pressed="${ob.intent === g.id}" style="padding:18px;display:flex;align-items:center;gap:16px;border-radius:18px;transition:box-shadow 400ms cubic-bezier(.4,0,.2,1), transform 400ms cubic-bezier(.4,0,.2,1);${ob.intent === g.id ? `box-shadow:${goalGlow(g.color)};` : ''}">
-          <span style="color:${g.color};flex-shrink:0">${g.svg()}</span>
-          <div style="flex:1"><div style="font-size:16px;font-weight:500;margin-bottom:2px">${g.label}</div>
-          <div style="font-size:13px;color:var(--text-tertiary)">${g.desc}</div></div>
-        </button>`).join('')}
-      </div>
-      <div style="padding-bottom:24px">
-        <button class="btn-primary" id="next-btn">Continue</button>
-        ${dots(6)}
-      </div>
-    </section>`;
-
-    const A = window.Aura;
-    const cards = Array.prototype.slice.call(root.querySelectorAll('.intent-card'));
-    const colorOf = {};
-    intents.forEach((g) => { colorOf[g.id] = g.color; });
-    cards.forEach((b) => b.onclick = () => {
-      if (ob.intent === b.dataset.intent) return;
-      ob.intent = b.dataset.intent;
-      cards.forEach((c) => {
-        const on = c.dataset.intent === ob.intent;
-        c.style.boxShadow = on ? goalGlow(colorOf[c.dataset.intent]) : '';
-        c.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-      A.haptic(8);
-    });
-
-    root.querySelector('[data-back]').onclick = () => goto('personalize');
-    root.querySelector('#next-btn').onclick = () => goto('previewRecommend'); // enabled; default 'ease' selected
-  };
+  // (Intent screen intentionally removed — onboarding no longer asks "What
+  // brings you here"; ob.intent keeps its 'ease' default and still drives
+  // session tailoring + the previewRecommend program pick.)
 })();
 
 // AURA — Onboarding flow, Agent C slice (screens 8-10).
@@ -446,9 +400,9 @@
             <button class="btn-primary" id="sounds-btn" style="flex:1">Sounds right</button>
           </div>
         </div>
-        ${dotsHTML(7)}
+        ${dotsHTML(6)}
       </section>`;
-    root.querySelector('[data-back]').onclick = () => goto('intent');
+    root.querySelector('[data-back]').onclick = () => goto('personalize');
     document.getElementById('customize-btn').onclick = () => toast('Customize after your first session');
     document.getElementById('sounds-btn').onclick = () => goto('permissions');
     // Fetch a tuned program; keep fallback copy on failure or if no match.
@@ -475,7 +429,6 @@
       <section class="screen screen--scroll" style="padding:24px">
         <div style="display:flex;align-items:center;gap:12px;padding:6px 4px 0">
           <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
-          <span class="overline" style="flex:1;text-align:center">Step 4 of 4</span>
           <div style="width:40px"></div>
         </div>
         <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;text-align:center;margin:18px 0 4px">Make it feel alive.</h1>
@@ -487,7 +440,7 @@
         </div>
         <div style="flex:1"></div>
         <button class="btn-primary" id="enter-btn" style="margin-top:18px;width:100%">Enter AURA</button>
-        ${dotsHTML(8)}
+        ${dotsHTML(7)}
       </section>`;
     root.querySelector('[data-back]').onclick = () => goto('previewRecommend');
     root.querySelectorAll('[data-toggle]').forEach(t => {
@@ -520,11 +473,13 @@
           </div>
           <button class="btn-primary" id="start-btn" style="max-width:340px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px">${icon('play', 18)} Start your first session</button>
           <button class="btn-ghost" data-back style="margin-top:12px">Back</button>
-          ${dotsHTML(9)}
+          ${dotsHTML(8)}
         </div>
       </section>`;
     root.querySelector('[data-back]').onclick = () => goto('permissions');
     document.getElementById('start-btn').onclick = async () => {
+      // Persist onboarding prefs, then drop straight into a session tailored to
+      // the choices made during onboarding (intent → pattern, length → cycles).
       try {
         await api.put('/profile', {
           goal: ob.goal,
@@ -535,8 +490,16 @@
         });
         const u = AuraState.user;
         if (u) { u.onboarded = true; AuraState.user = u; }
-        goto('home');
-      } catch (err) { (window.Aura.handleApiError || toast)(err); }
+      } catch (err) { /* profile sync is best-effort; still start the session */ }
+      const intent = ob.intent || 'ease';
+      const pattern = {
+        ease:  { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' },
+        clear: { inhale: 4, hold: 4, exhale: 4, name: 'Box' },
+        rest:  { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' },
+      }[intent] || { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' };
+      const cycleSec = pattern.inhale + pattern.hold + pattern.exhale;
+      const cycles = Math.max(2, Math.round((ob.length || 5) * 60 / cycleSec));
+      App.startSession({ inhale: pattern.inhale, hold: pattern.hold, exhale: pattern.exhale, cycles, name: pattern.name, mood: null });
     };
   };
 
