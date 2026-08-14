@@ -87,7 +87,7 @@
     const q = raw.includes('?') ? new URLSearchParams(raw.slice(raw.indexOf('?') + 1)) : new URLSearchParams();
     routeParams = Object.fromEntries(q.entries());
     const user = AuraState.user;
-    const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'forgot', 'forgotSent', 'reset', 'resetSuccess', 'verify', 'verifySuccess', 'how', ''];
+    const publicRoutes = ['splash', 'welcome', 'login', 'signup', 'forgot', 'forgotSent', 'reset', 'resetSuccess', 'verify', 'verifySuccess', 'how', 'softEntry', 'guided', 'liveDemo', 'personalize', 'intent', 'previewRecommend', 'permissions', 'transition', ''];
     if (!user && !publicRoutes.includes(h)) {
       if (authProbe === 'pending') return; // probe will re-route when it lands
       if (authProbe === null) {
