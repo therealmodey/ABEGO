@@ -344,6 +344,31 @@ input[type="range"].aura-slider::-webkit-slider-thumb:active { transform: scale(
 }
 .screen--wide { max-width: 1100px; }
 
+/* ============ Mobile fit: zero scroll, constant orb ============
+   The orb must read the SAME size on every screen AND never overflow a small
+   phone. We pin it to a viewport-relative constant (so it is identical across
+   screens) that scales down only on narrow/short viewports. Internal blobs are
+   percentage/inset based, so they follow the wrap. */
+.screen .orb-wrap {
+  width: min(58vw, 220px) !important;
+  height: min(58vw, 220px) !important;
+  flex-shrink: 0;
+}
+
+/* Compact every full-screen surface on small phones so nothing scrolls.
+   Targets short (landscape-ish / small) and narrow devices. */
+@media (max-height: 740px), (max-width: 400px) {
+  .screen { padding: 16px !important; }
+  .screen[style*="padding"] { padding: 16px !important; }
+  .screen h1 { font-size: clamp(22px, 7vw, 28px) !important; line-height: 1.18 !important; }
+  .screen p, .screen .overline { font-size: 13px !important; }
+  .screen .btn-primary { padding: 13px 18px !important; font-size: 15px !important; }
+  /* Shrink the orb a touch more on the smallest screens, but keep it constant. */
+  .screen .orb-wrap { width: min(54vw, 180px) !important; height: min(54vw, 180px) !important; }
+  /* Let flex children compress instead of forcing a scrollbar. */
+  .screen > div[style*="flex:1"], .screen > div[style*="flex: 1"] { min-height: 0; }
+}
+
 /* ============ Auth / form ============ */
 .field { margin-bottom: 16px; }
 .field label { display: block; font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px; letter-spacing: 0.5px; }

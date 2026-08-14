@@ -65,7 +65,7 @@
       <header style="text-align:center;padding-top:28px"><span style="font-size:14px;font-weight:500;letter-spacing:8px;padding-left:8px">AURA</span></header>
       <div style="flex:1;display:flex;align-items:center;justify-content:center">${orbHTML(240, 'idle')}</div>
       <div style="text-align:center;padding-bottom:32px">
-        <h1 style="font-size:32px;font-weight:600;letter-spacing:-0.5px;line-height:1.25;margin-bottom:14px">Breathe with<br/>intention.</h1>
+        <h1 style="font-size:32px;font-weight:600;letter-spacing:-0.5px;line-height:1.25;margin-bottom:14px">Breathe with intention.</h1>
         <p style="font-size:15px;color:var(--text-tertiary);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath. Calmer in seconds, clearer in minutes.</p>
         <button class="btn-primary" id="begin-btn" style="max-width:360px;margin:0 auto">Begin</button>
         <button style="margin-top:18px;font-size:14px;color:var(--text-tertiary);display:block;width:100%" id="login-link">I already have an account</button>
@@ -122,7 +122,7 @@
         <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
       </header>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">The rhythm is<br/>simple.</h1>
+      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">The rhythm is simple.</h1>
       <div style="display:flex;flex-direction:column;gap:14px;flex:1">
         ${cards.map((c) => `
         <article class="glass" style="padding:18px;display:flex;align-items:center;gap:16px">
@@ -240,7 +240,7 @@
         </div>
         <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
       </header>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">Tune AURA<br/>to you.</h1>
+      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">Tune AURA to you.</h1>
 
       <div style="margin-bottom:28px">
         <div style="display:flex;justify-content:space-between;margin-bottom:14px">
