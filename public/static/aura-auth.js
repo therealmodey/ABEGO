@@ -309,8 +309,15 @@
       termsBox.style.borderColor = terms ? 'transparent' : 'rgba(255,255,255,0.15)';
       termsBox.innerHTML = terms ? icon('check', 10, '#fff', 2.5) : '';
     };
-    // Whole row is clickable; ignore clicks on the inline links so they still navigate.
-    termsRow.onclick = (e) => { if (e.target.tagName === 'A') return; toggleTerms(); };
+    // Terms acceptance must be reliable: the inline links must neither navigate
+    // (a bare #signup href re-renders the screen and resets terms=false, which
+    // makes the submit guard swallow the server error) nor bubble up to toggle.
+    // The checkbox box and the row both toggle; the links are inert.
+    termsBox.onclick = (e) => { e.stopPropagation(); toggleTerms(); };
+    termsRow.onclick = (e) => {
+      if (e.target.tagName === 'A') { e.preventDefault(); e.stopPropagation(); return; }
+      toggleTerms();
+    };
 
     const strengthSlot = document.getElementById('strength-slot');
     function renderStrength() {
