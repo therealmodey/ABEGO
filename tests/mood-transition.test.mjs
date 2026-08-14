@@ -33,7 +33,7 @@ function boot() {
   const dom = new JSDOM(
     `<!doctype html><html><head><meta name="theme-color" content="#0B0F1A"></head>
      <body><div id="app"></div></body></html>`,
-    { url: 'https://aura.test/#home', pretendToBeVisual: true, runScripts: 'outside-only' },
+    { url: 'https://aura.test/#mood', pretendToBeVisual: true, runScripts: 'outside-only' },
   );
   const { window } = dom;
 
@@ -97,6 +97,10 @@ const PLANS = {
 };
 
 async function openMood(env) {
+  // Let the deferred boot router (route() via setTimeout(0)) land on #mood
+  // before we capture node identity — otherwise the later home boot would
+  // replace the mood screen mid-test and the "same node" assertions misfire.
+  await tick(); await tick(); await tick();
   env.window.AuraApp.routes.mood();
   await tick();
   return env.window.document;
