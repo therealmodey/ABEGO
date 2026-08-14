@@ -42,12 +42,12 @@ function closeAll() { WINDOWS.forEach((w) => { try { w.close(); } catch (e) { /*
 
 const USER = { id: 1, name: 'Tester', email: 't@e.st', plan: 'free', onboarded: true, sessionLength: 5 };
 const PROGRAMS = [
-  { id: 1, title: 'First Breath', category: 'beginner', phase: 'inhale', tag: 'Calm', intents: 'calm,stress', duration_min: 3, inhale: 4, hold: 2, exhale: 6, cycles: 6, locked: 0, is_new: 0 },
-  { id: 2, title: 'Steady Ground', category: 'beginner', phase: 'exhale', tag: 'Stress', intents: 'stress', duration_min: 5, inhale: 4, hold: 4, exhale: 4, cycles: 8, locked: 0, is_new: 1 },
-  { id: 3, title: 'Deep Unwind', category: 'deep_calm', phase: 'hold', tag: 'Calm', intents: 'calm', duration_min: 10, inhale: 4, hold: 7, exhale: 8, cycles: 10, locked: 0, is_new: 0 },
-  { id: 4, title: 'Sharp Focus', category: 'deep_calm', phase: 'idle', tag: 'Focus', intents: 'focus', duration_min: 8, inhale: 5, hold: 0, exhale: 5, cycles: 9, locked: 1, is_new: 0 },
-  { id: 5, title: 'Body Scan', category: 'sleep_prep', phase: 'exhale', tag: 'Calm', intents: 'sleep,calm', duration_min: 12, inhale: 4, hold: 6, exhale: 8, cycles: 12, locked: 0, is_new: 0 },
-  { id: 6, title: 'Night Drift', category: 'sleep_prep', phase: 'hold', tag: 'Sleep', intents: 'sleep', duration_min: 15, inhale: 4, hold: 7, exhale: 9, cycles: 14, locked: 1, is_new: 0 },
+  { id: 1, title: 'First Breath', category: 'calm', phase: 'inhale', tag: 'Calm', intents: 'calm,stress', duration_min: 3, inhale: 4, hold: 2, exhale: 6, cycles: 6, locked: 0, is_new: 0 },
+  { id: 2, title: 'Steady Ground', category: 'stress', phase: 'exhale', tag: 'Stress', intents: 'stress', duration_min: 5, inhale: 4, hold: 4, exhale: 4, cycles: 8, locked: 0, is_new: 1 },
+  { id: 3, title: 'Deep Unwind', category: 'calm', phase: 'hold', tag: 'Calm', intents: 'calm', duration_min: 10, inhale: 4, hold: 7, exhale: 8, cycles: 10, locked: 0, is_new: 0 },
+  { id: 4, title: 'Sharp Focus', category: 'focus', phase: 'idle', tag: 'Focus', intents: 'focus', duration_min: 8, inhale: 5, hold: 0, exhale: 5, cycles: 9, locked: 1, is_new: 0 },
+  { id: 5, title: 'Body Scan', category: 'sleep', phase: 'exhale', tag: 'Calm', intents: 'sleep,calm', duration_min: 12, inhale: 4, hold: 6, exhale: 8, cycles: 12, locked: 0, is_new: 0 },
+  { id: 6, title: 'Night Drift', category: 'sleep', phase: 'hold', tag: 'Sleep', intents: 'sleep', duration_min: 15, inhale: 4, hold: 7, exhale: 9, cycles: 14, locked: 1, is_new: 0 },
 ];
 
 // ---------------------------------------------------------------- environment
@@ -387,6 +387,10 @@ let libEnv;
 {
   const env = libEnv = boot();
   const { document } = env.window;
+  // Flush the deferred boot router (route() via setTimeout 0) before rendering,
+  // so it lands on #home and the subsequently-rendered programs screen is the
+  // stable node the rest of the task asserts identity against.
+  await tick(); await tick(); await tick();
   await env.window.AuraApp.routes.programs();
   await tick(); await tick();
 
@@ -443,7 +447,7 @@ let libEnv;
   const shownHeads = [...document.querySelectorAll('[data-cat].overline')]
     .filter((h) => !h.classList.contains('lib-off')).map((h) => h.dataset.cat);
   check('empty category headings are hidden, matching the old rebuild',
-    shownHeads.join(',') === 'deep_calm', shownHeads.join(','));
+    shownHeads.join(',') === 'focus', shownHeads.join(','));
 
   // Chip selection is exclusive and eased in place.
   const sel = [...document.querySelectorAll('[data-f]')].filter((c) => c.classList.contains('selected'));
@@ -643,6 +647,9 @@ console.log('\nTASK 2 — Global: nothing animates a layout property');
   // Settings appearance switch must not rebuild the screen.
   const env = boot();
   const { document } = env.window;
+  // Flush the deferred boot router before rendering so the settings screen is
+  // the stable node the identity assertions below check against.
+  await tick(); await tick(); await tick();
   await env.window.AuraApp.routes.settings();
   await tick(); await tick();
 

@@ -34,11 +34,11 @@ Regular users sign up through the app at `/`.
 ### Core product
 - Signup / login / logout / me — PBKDF2 (100k iters) + HS256 JWT (Web Crypto only, Workers-safe), httpOnly cookie + Bearer; logout revokes the token server-side
 - Full auth flow: email verification (dev code in dev), forgot → reset (token-from-URL works from emailed links), change password (signs out other devices), and a complete **Account & Security** surface (sign out everywhere, export data, delete account with 3-step confirmation)
-- 18-screen SPA replicating the design: splash → welcome → auth → onboarding (how-it-works, personalize, permissions) → home with liquid orb → session engine (inhale/hold/exhale state machine, pause veil, completion stats) → mood check-in → stats → programs → session setup sheet → history → profile → settings
+- 18-screen SPA replicating the design: splash → welcome → auth → onboarding (soft entry, how-it-works, live demo, personalize, intent, preview/recommend, permissions, transition) → home with liquid orb → session engine (inhale/hold/exhale state machine, pause veil, completion stats) → mood check-in → stats → programs → session setup sheet → history → profile → settings
 - Breathing session engine: 1s tick, phase-colored orb morphing, progress ring, cycle tracking
 - Mood check-ins with rule-based AI: anxious→4-7-8, calm→box, tired→6-2-4 energizing, focused→coherent 5-0-5, with evening pace adaptation
 - Smart insights: calm score (70% 7-day avg + 25% consistency + mood boost), streaks, daily bars, time-of-day insight generation
-- 6 seeded programs across 3 categories (2 free, 4 premium)
+- 18 seeded programs across 4 intent categories — Stress / Sleep / Focus / Calm (10 free, 8 premium); each carries `intents` so the Library filter pills (All/Stress/Sleep/Focus/Calm) surface cross-intent programs via `matchesFilter`
 
 ### Admin access system (Part 2)
 - RBAC `user`/`admin`; role re-validated from DB on **every** request (JWT never trusted alone)
@@ -105,7 +105,7 @@ Regular users sign up through the app at `/`.
 
 ## User Guide
 1. Open the app → splash → **Get started** → sign up
-2. Complete onboarding (stress level, goal, session length)
+2. Complete onboarding — soft entry, how-it-works, live demo, then personalize (stress level, session length), pick an **intent** (ease / clarity / rest), and grant permissions (sound, haptics, reminders); preferences commit via `PUT /profile`
 3. On Home, tap the orb (or long-press the FAB for quick start) to begin a breathing session; follow inhale/hold/exhale cues
 4. Check in your mood — AURA suggests a matching pattern
 5. Explore **Programs** (premium ones show a lock → upgrade modal), **Stats**, **History**, **Profile/Settings**
