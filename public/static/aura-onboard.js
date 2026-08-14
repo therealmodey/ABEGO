@@ -72,7 +72,7 @@
         ${dots(1)}
       </div>
     </section>`;
-    document.getElementById('begin-btn').onclick = () => goto('guided');
+    document.getElementById('begin-btn').onclick = () => goto('signup');
     document.getElementById('login-link').onclick = () => goto('login');
   };
 
