@@ -823,7 +823,7 @@
     let d;
     try { ({ data: d } = await api.get('/app/programs')); }
     catch (err) { handleApiError(err); return go('home'); }
-    const cats = { beginner: 'Beginner', deep_calm: 'Deep Calm', sleep_prep: 'Sleep Prep' };
+    const cats = { stress: 'Stress', sleep: 'Sleep', focus: 'Focus', calm: 'Calm' };
     let filter = 'All';
     const tagFilters = ['All', 'Stress', 'Sleep', 'Focus', 'Calm'];
 
@@ -886,9 +886,9 @@
             <span style="display:flex;align-items:center;gap:8px"><span style="font-size:15px;font-weight:500">${p.title}</span>
             ${p.is_new ? '<span class="badge badge--premium">NEW</span>' : ''}
             ${p.locked ? `<span style="color:var(--text-tertiary)">${icon('shield', 13)}</span>` : ''}</span>
-            <span style="display:block;font-size:12px;color:var(--text-tertiary);margin-top:3px">${p.duration_min} min · ${p.tag} · ${p.inhale}-${p.hold}-${p.exhale}</span>
+            <span style="display:block;font-size:12px;color:var(--text-tertiary);margin-top:3px;font-variant-numeric:tabular-nums">${p.duration_min} min · ${p.tag} · ${p.inhale}-${p.hold}-${p.exhale}</span>
           </span>
-          <button class="btn-icon" data-play="${p.id}" style="width:44px;height:44px;${p.locked ? 'opacity:0.4' : ''}" aria-label="Play ${p.title}">${icon('play', 16)}</button>
+          <button class="btn-icon" data-play="${p.id}" style="width:44px;height:44px;${p.locked ? 'opacity:0.4' : ''};transition:transform 120ms cubic-bezier(0.2,0,0,1);active:scale(0.96)" aria-label="Play ${p.title}">${icon('play', 16)}</button>
         </article>`).join('')}`;
       }).join('')}
     </section>`;

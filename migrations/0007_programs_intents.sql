@@ -1,18 +1,12 @@
--- Seed: reference content only.
---
--- SECURITY: no admin account is seeded here. Shipping a known email/password
--- pair in the repo means anyone reading it owns every deployment that ran the
--- seed. Create the first admin instead with:
---
---   node scripts/bootstrap-admin.mjs you@example.com 'a-strong-password'
---
--- and run the SQL it prints against your database.
+-- Migration 0007: reseed the program library with 4 intent-based sections
+-- (stress / sleep / focus / calm). Re-categorizes the original 6 reference
+-- programs and adds 12 new programs (3 per intent) with real breathing
+-- patterns. The Library screen groups by `category` and cross-filters via
+-- `intents`, so this single table drives both the sections and the pills.
 
--- Program library — 4 intent sections (stress / sleep / focus / calm).
--- Re-categorizes the original reference programs and adds 12 new ones
--- (3 per intent) with real breathing patterns. The Library groups by
--- `category` and cross-filters via `intents`.
-INSERT OR IGNORE INTO programs (slug, title, category, tag, intents, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new, sort_order) VALUES
+DELETE FROM programs;
+
+INSERT INTO programs (slug, title, category, tag, intents, duration_min, inhale, hold, exhale, cycles, phase, is_premium, is_new, sort_order) VALUES
   -- ---- STRESS ----
   ('478-unwind',        '4-7-8 Unwind',        'stress', 'Stress', 'stress,sleep,calm',    10, 4, 7, 8, 12, 'exhale', 1, 1, 1),
   ('acute-stress-reset','Acute Stress Reset',   'stress', 'Reset',  'stress,calm',           3, 2, 4, 6,  6,  'exhale', 0, 1, 2),
