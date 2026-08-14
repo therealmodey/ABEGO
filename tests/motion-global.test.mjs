@@ -113,6 +113,9 @@ function boot(opts) {
 
   window.eval(read('aura-core.js'));
   window.eval(read('app.js'));
+  // Onboarding routes (welcome/how/personalize/permissions + extended flow) now
+  // live in aura-onboard.js, loaded after app.js in the real shell.
+  window.eval(read('aura-onboard.js'));
   return {
     window,
     calls,

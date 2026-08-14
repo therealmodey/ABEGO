@@ -49,6 +49,7 @@ ${fonts}
 <script src="/static/aura-core.js"></script>
 <script src="/static/${script}"></script>
 <script src="/static/aura-auth.js"></script>
+<script src="/static/aura-onboard.js"></script>
 </body>
 </html>`
 

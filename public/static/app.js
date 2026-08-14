@@ -214,28 +214,6 @@
   };
 
   // ================= 01 WELCOME =================
-  routes.welcome = function () {
-    root.innerHTML = `${bgHTML()}
-    <section class="screen" id="welcome-screen" style="padding:24px">
-      <header style="text-align:center;padding-top:28px"><span style="font-size:14px;font-weight:500;letter-spacing:8px;padding-left:8px">AURA</span></header>
-      <div style="flex:1;display:flex;align-items:center;justify-content:center">${orbHTML(240, 'idle')}</div>
-      <div style="text-align:center;padding-bottom:32px">
-        <h1 style="font-size:32px;font-weight:600;letter-spacing:-0.5px;line-height:1.25;margin-bottom:14px">Breathe with<br/>intention.</h1>
-        <p style="font-size:15px;color:var(--ink-55);max-width:280px;margin:0 auto 32px;line-height:1.5">A living orb that guides your breath. Calmer in seconds, clearer in minutes.</p>
-        <button class="btn-primary" id="begin-btn">Begin</button>
-        <button style="margin-top:18px;font-size:14px;color:var(--text-tertiary)" id="login-link">I already have an account</button>
-        <nav style="display:flex;gap:8px;justify-content:center;margin-top:28px" aria-label="Onboarding progress">
-          <span style="width:20px;height:5px;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-        </nav>
-      </div>
-    </section>`;
-    document.getElementById('begin-btn').onclick = () => go('signup');
-    document.getElementById('login-link').onclick = () => go('login');
-  };
-
   // ================= AUTH =================
   function authScreen(mode) {
     const isLogin = mode === 'login';
@@ -279,174 +257,7 @@
   }
 
   // ================= 02 HOW IT WORKS =================
-  routes.how = function () {
-    const cards = [
-      { phase: 'inhale', label: 'Inhale', desc: 'Expand slowly with the orb', dur: '4s' },
-      { phase: 'hold', label: 'Hold', desc: 'Pause at the peak', dur: '2s' },
-      { phase: 'exhale', label: 'Exhale', desc: 'Release and soften', dur: '7s' },
-    ];
-    root.innerHTML = `${bgHTML('blue')}
-    <section class="screen screen--scroll" style="padding:24px">
-      <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:36px">
-        <span class="overline">Step 2 of 4</span>
-        <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
-      </header>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:28px">The rhythm is<br/>simple.</h1>
-      <div style="display:flex;flex-direction:column;gap:14px;flex:1">
-        ${cards.map((c) => `
-        <article class="glass" style="padding:18px;display:flex;align-items:center;gap:16px">
-          <div style="width:56px;height:56px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9), ${PHASE[c.phase].a} 40%, ${PHASE[c.phase].b} 80%);box-shadow:0 0 24px ${PHASE[c.phase].glow}"></div>
-          <div style="flex:1"><div style="font-size:16px;font-weight:500;margin-bottom:3px">${c.label}</div>
-          <div style="font-size:13px;color:var(--text-tertiary)">${c.desc}</div></div>
-          <span class="tabular" style="font-size:15px;color:${PHASE[c.phase].a};font-weight:500">${c.dur}</span>
-        </article>`).join('')}
-      </div>
-      <div style="padding-bottom:24px">
-        <button class="btn-primary" id="next-btn">Continue</button>
-        <nav style="display:flex;gap:8px;justify-content:center;margin-top:24px">
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-          <span style="width:20px;height:5px;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-          <span style="width:5px;height:5px;border-radius:3px;background:var(--dot-dim)"></span>
-        </nav>
-      </div>
-    </section>`;
-    document.getElementById('next-btn').onclick = () => go(AuraState.user ? 'personalize' : 'signup');
-    document.getElementById('skip-btn').onclick = () => go(AuraState.user ? 'home' : 'signup');
-  };
-
-  // ================= 03 PERSONALIZE =================
-  routes.personalize = function () {
-    const stressLabel = (v) => v <= 3 ? 'Low' : v <= 6 ? 'Moderate' : 'High';
-    const goals = [
-      { id: 'relax', label: 'Relax', ic: 'lotus', color: '#34D399' },
-      { id: 'focus', label: 'Focus', ic: 'focus', color: '#60A5FA' },
-      { id: 'sleep', label: 'Sleep', ic: 'moon', color: '#A78BFA' },
-    ];
-    root.innerHTML = `${bgHTML()}
-    <section class="screen screen--scroll" style="padding:24px">
-      <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:30px">
-        <span class="overline">Step 3 of 4</span>
-        <button id="skip-btn" style="font-size:13px;color:var(--text-tertiary)">Skip</button>
-      </header>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:30px">Tune AURA<br/>to you.</h1>
-
-      <div style="margin-bottom:30px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:14px">
-          <span class="overline">Stress today</span>
-          <span id="stress-val" class="slider-val" style="font-size:13px;color:#60A5FA">${stressLabel(ob.stress)} · ${ob.stress}</span>
-        </div>
-        <input type="range" min="0" max="10" value="${ob.stress}" class="aura-slider" id="stress-slider" aria-label="Stress level">
-      </div>
-
-      <div style="margin-bottom:30px">
-        <div class="overline" style="margin-bottom:14px">Your goal</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px" id="goal-grid">
-          ${goals.map((g) => `
-          <button class="glass goal-card" data-goal="${g.id}" style="padding:20px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;border-radius:18px;transition:box-shadow 400ms cubic-bezier(0.4,0,0.2,1), transform 400ms cubic-bezier(0.4,0,0.2,1);${ob.goal === g.id ? `box-shadow:${goalGlow(g.color)};` : ''}">
-            <span style="color:${g.color}">${icon(g.ic, 26)}</span>
-            <span style="font-size:13px;font-weight:500">${g.label}</span>
-          </button>`).join('')}
-        </div>
-      </div>
-
-      <div style="margin-bottom:30px">
-        <div class="overline" style="margin-bottom:14px">Preferred session</div>
-        <div style="display:flex;gap:10px" id="len-row">
-          ${[3, 5, 10, 15].map((m) => `<button class="chip ${ob.length === m ? 'selected' : ''}" data-len="${m}">${m} min</button>`).join('')}
-        </div>
-      </div>
-
-      <div style="flex:1"></div>
-      <div style="padding-bottom:24px">
-        <button class="btn-primary" id="next-btn">Continue</button>
-      </div>
-    </section>`;
-    attachSlider(document.getElementById('stress-slider'), {
-      onMove: (v) => setSliderVal(document.getElementById('stress-val'), `${stressLabel(v)} · ${v}`),
-      onCommit: (v) => { ob.stress = v; },
-    });
-    // Same global fix as the mood check-in: tapping a goal or a length used to
-    // call routes.personalize(), re-running root.innerHTML and rebuilding the
-    // whole screen — replaying the 420ms enter animation, restarting the
-    // ambient-drift keyframes on a new .aura-bg and re-rasterizing the glass
-    // cards. Selection is now patched on the SAME nodes, so the glow and the
-    // chip state ease over 400ms instead of the screen jolting.
-    const goalCards = Array.prototype.slice.call(document.querySelectorAll('.goal-card'));
-    const lenChips = Array.prototype.slice.call(document.querySelectorAll('[data-len]'));
-    const goalColor = {};
-    goals.forEach((g) => { goalColor[g.id] = g.color; });
-    goalCards.forEach((b) => { b.setAttribute('aria-pressed', ob.goal === b.dataset.goal ? 'true' : 'false'); });
-    lenChips.forEach((b) => { b.setAttribute('aria-pressed', ob.length === +b.dataset.len ? 'true' : 'false'); });
-    goalCards.forEach((b) => b.onclick = () => {
-      if (ob.goal === b.dataset.goal) return;
-      ob.goal = b.dataset.goal;
-      goalCards.forEach((c) => {
-        const on = c.dataset.goal === ob.goal;
-        c.style.boxShadow = on ? goalGlow(goalColor[c.dataset.goal]) : '';
-        c.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-      haptic(8);
-    });
-    lenChips.forEach((b) => b.onclick = () => {
-      const v = +b.dataset.len;
-      if (ob.length === v) return;
-      ob.length = v;
-      lenChips.forEach((c) => {
-        const on = +c.dataset.len === v;
-        c.classList.toggle('selected', on);
-        c.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-      haptic(6);
-    });
-    document.getElementById('next-btn').onclick = () => go('permissions');
-    document.getElementById('skip-btn').onclick = () => go('permissions');
-  };
-
   // ================= 04 PERMISSIONS =================
-  routes.permissions = function () {
-    const rows = [
-      { key: 'sound', label: 'Spatial Sound', desc: 'Breathing tones that move with you', color: '#60A5FA' },
-      { key: 'haptics', label: 'Haptic Feedback', desc: 'Gentle pulses guide each phase', color: '#A78BFA' },
-      { key: 'reminders', label: 'Gentle Reminders', desc: 'A soft nudge, never a guilt trip', color: '#34D399' },
-    ];
-    root.innerHTML = `${bgHTML('green')}
-    <section class="screen screen--scroll" style="padding:24px">
-      <header style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;margin-bottom:16px">
-        <span class="overline">Step 4 of 4</span><span></span>
-      </header>
-      <div style="display:flex;justify-content:center;margin-bottom:24px">${orbHTML(140, 'exhale', { intensity: 0.6 })}</div>
-      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;text-align:center;margin-bottom:30px">Make it feel<br/>alive.</h1>
-      <div class="glass" style="padding:8px 20px">
-        ${rows.map((r) => `
-        <div style="display:flex;align-items:center;gap:14px;padding:16px 0;border-bottom:1px solid var(--hairline-soft)">
-          <div style="width:8px;height:8px;border-radius:50%;background:${r.color};box-shadow:0 0 12px ${r.color}"></div>
-          <div style="flex:1"><div style="font-size:15px;font-weight:500">${r.label}</div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px">${r.desc}</div></div>
-          <button class="toggle ${ob[r.key] ? 'on' : ''}" data-key="${r.key}" role="switch" aria-checked="${ob[r.key]}" aria-label="${r.label}"></button>
-        </div>`).join('')}
-      </div>
-      <div style="flex:1"></div>
-      <div style="padding-bottom:24px">
-        <button class="btn-primary" id="enter-btn">Enter AURA</button>
-      </div>
-    </section>`;
-    document.querySelectorAll('.toggle').forEach((t) => t.onclick = () => {
-      ob[t.dataset.key] = !ob[t.dataset.key];
-      t.classList.toggle('on'); t.setAttribute('aria-checked', ob[t.dataset.key]);
-    });
-    document.getElementById('enter-btn').onclick = async () => {
-      try {
-        await api.put('/app/profile', {
-          goal: ob.goal, baselineStress: ob.stress, sessionLength: ob.length,
-          prefs: { sound: ob.sound, haptics: ob.haptics, reminders: ob.reminders }, onboarded: true,
-        });
-        const u = AuraState.user; u.onboarded = true; AuraState.user = u;
-        go('home');
-      } catch (err) { handleApiError(err); }
-    };
-  };
-
   // ================= 05 HOME =================
   routes.home = function () {
     const u = AuraState.user || {};
@@ -1475,6 +1286,11 @@
     });
   };
 
-  route(); // boot
+  // Boot render is deferred one tick so modules loaded AFTER app.js in the
+  // shell (aura-onboard.js, which owns welcome/how/personalize/permissions)
+  // have registered their routes before the first route() resolves. Without
+  // this, a synchronous route() here hits `(routes[h] || routes.welcome)()`
+  // while routes.welcome is still undefined → throws → window.AuraApp unset.
+  setTimeout(route, 0); // boot
   window.AuraApp = { routes, go, ob, startSession, get routeParams() { return routeParams; } };
 })();

@@ -21,6 +21,7 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
 const CSS = read('public/static/aura.css');
 const APP = read('public/static/app.js');
+const ONBOARD = read('public/static/aura-onboard.js');
 const CORE = read('public/static/aura-core.js');
 const ADMIN_JS = read('public/static/admin.js');
 const ADMIN_TS = read('src/routes/admin.ts');
@@ -363,7 +364,7 @@ check('Library .lib-off crossfade class still present',
 check('reduced-motion guard still neutralises animation globally',
   /prefers-reduced-motion:\s*reduce/.test(CSS_NC));
 check('no feature routes were removed from the app',
-  ['mood', 'programs', 'settings', 'personalize', 'home'].every((r) => new RegExp(`routes\\.${r}\\s*=`).test(APP)));
+  ['mood', 'programs', 'settings', 'personalize', 'home'].every((r) => new RegExp(`routes\\.${r}\\s*=`).test(APP + ONBOARD)));
 
 // ---------------------------------------------------------------- summary
 console.log('\n----------------------------------------------------');
