@@ -8,6 +8,10 @@
 // 24x24 SVGs (stroke=currentColor, 1.5, fill=none) per the build contract.
 (function () {
   'use strict';
+  // Guard: aura-onboard.js is loaded on ALL pages (pricing/billing/admin too)
+  // but window.AuraApp only exists where app.js is loaded. Without this guard
+  // the destructuring below throws on non-app pages, polluting the console.
+  if (!window.AuraApp) return;
   const { api, AuraState, orbHTML, icon, toast, bgHTML, PHASE } = window.Aura;
   const App = window.AuraApp;            // { routes, go, ... } defined in app.js
   const root = document.getElementById('app');
@@ -23,7 +27,7 @@
   // ---- 10-step progress dots; `active` is the 0-based index of the lit segment ----
   function dots(active) {
     let s = '<nav style="display:flex;gap:6px;justify-content:center;margin-top:18px" aria-hidden="true">';
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 9; i++) {
       const on = i === active;
       s += `<span style="width:${on ? 20 : 5}px;height:5px;border-radius:3px;background:${on ? 'linear-gradient(90deg,#7C3AED,#22D3EE)' : 'rgba(255,255,255,0.18)'}"></span>`;
     }
@@ -151,6 +155,7 @@
 // inlined as 24x24 SVGs (stroke=currentColor, 1.5, fill=none) per the build contract.
 (function () {
   'use strict';
+  if (!window.AuraApp) return; // see guard in slice A — skip on non-app pages
   const { api, AuraState, orbHTML, icon, toast, bgHTML } = window.Aura;
   const App = window.AuraApp;            // { routes, go, ... } defined in app.js
   const root = document.getElementById('app');
@@ -169,7 +174,7 @@
   // ---- 10-step progress dots; `active` is the 0-based index of the lit segment ----
   function dots(active) {
     let s = '<nav style="display:flex;gap:6px;justify-content:center;margin-top:18px" aria-hidden="true">';
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 9; i++) {
       const on = i === active;
       s += `<span style="width:${on ? 20 : 5}px;height:5px;border-radius:3px;background:${on ? 'linear-gradient(90deg,#7C3AED,#22D3EE)' : 'rgba(255,255,255,0.18)'}"></span>`;
     }
@@ -323,6 +328,7 @@
 // Mirrors aura-auth.js structure; uses only window.Aura atoms + aura.css classes.
 (function () {
   'use strict';
+  if (!window.AuraApp) return; // see guard in slice A — skip on non-app pages
   const { api, AuraState, orbHTML, icon, toast, bgHTML } = window.Aura;
   const App = window.AuraApp;
   const root = document.getElementById('app');
@@ -338,7 +344,7 @@
   // Progress dots (10, one lit at the given index).
   function dotsHTML(active) {
     let s = '<div style="display:flex;gap:6px;justify-content:center;padding:14px 0 4px">';
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 9; i++) {
       if (i === active) s += '<span class="pulse-dot" style="width:20px;height:5px;border-radius:3px;background:linear-gradient(90deg,#7C3AED,#22D3EE)"></span>';
       else s += '<span class="pulse-dot" style="width:5px;height:5px;border-radius:3px;background:rgba(255,255,255,0.18)"></span>';
     }
@@ -367,34 +373,46 @@
   }
 
   // =====================================================================
-  // 8 · previewRecommend
+  // 8 · previewRecommend  (tailored to ob.goal + ob.length)
   // =====================================================================
+  // Pattern per goal — drives both the recommendation copy AND the first session.
+  const GOAL_PATTERN = {
+    relax: { inhale: 4, hold: 7, exhale: 8, name: '4-7-8', label: 'reset', sub: 'Slow exhale · calms the nervous system' },
+    focus: { inhale: 4, hold: 4, exhale: 4, name: 'Box', label: 'focus sprint', sub: 'Equal cycles · steadies attention' },
+    sleep: { inhale: 4, hold: 7, exhale: 8, name: '4-7-8', label: 'descent', sub: 'Extended exhale · eases you toward rest' },
+  };
   App.routes.previewRecommend = function () {
+    const goal = ob.goal || 'relax';
+    const p = GOAL_PATTERN[goal] || GOAL_PATTERN.relax;
+    const minutes = ob.length || 5;
+    const cycleSec = p.inhale + p.hold + p.exhale;
+    const cycles = Math.max(2, Math.round(minutes * 60 / cycleSec));
+    const mm = String(minutes).padStart(2, '0');
     root.innerHTML = `${bgHTML('deep')}
-      <section class="screen screen--scroll" style="padding:24px">
+      <section class="screen" style="padding:24px;justify-content:center">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px 0">
           <button class="btn-icon" data-back aria-label="Back">${icon('back', 17)}</button>
           <div style="width:40px"></div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:8px">
+        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;flex:1;justify-content:center">
           <div class="overline" style="display:inline-flex;align-items:center;gap:8px;margin-bottom:14px;color:#34D399">
             <span style="width:6px;height:6px;border-radius:50%;background:#34D399;box-shadow:0 0 8px #34D399"></span> TUNED TO YOU
           </div>
-          <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.5px;margin-bottom:18px">We recommend a <span class="grad-text">3-minute reset</span></h1>
-          <div style="position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:18px">
+          <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.5px;margin-bottom:16px">We recommend a <span class="grad-text">${minutes}-minute ${p.label}</span></h1>
+          <div style="position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:16px">
             <div style="position:absolute;inset:0;background:radial-gradient(circle,rgba(52,211,153,0.22) 0%,transparent 60%);filter:blur(22px)"></div>
             ${orbHTML(150, 'idle', { intensity: 0.78 })}
           </div>
-          <div class="glass" style="width:100%;max-width:360px;padding:18px;margin-bottom:16px;text-align:left">
-            <div id="prog-name" style="font-size:16px;font-weight:600">4-7-8 · Deep Unwind</div>
-            <div id="prog-sub" class="overline" style="color:var(--text-tertiary);margin-top:4px">Slow exhale · calms the nervous system</div>
+          <div class="glass" style="width:100%;max-width:360px;padding:16px;margin-bottom:14px;text-align:left">
+            <div id="prog-name" style="font-size:16px;font-weight:600">${p.name} · ${goal === 'focus' ? 'Sharp Focus' : goal === 'sleep' ? 'Twilight Descent' : 'Deep Unwind'}</div>
+            <div id="prog-sub" class="overline" style="color:var(--text-tertiary);margin-top:4px">${p.sub}</div>
           </div>
-          <div style="display:flex;gap:10px;width:100%;max-width:360px;margin-bottom:14px">
-            ${statHTML('Inhale', '4s', PHASE.inhale.a)}
-            ${statHTML('Hold', '7s', PHASE.hold.a)}
-            ${statHTML('Exhale', '8s', PHASE.exhale.a)}
+          <div style="display:flex;gap:10px;width:100%;max-width:360px;margin-bottom:12px">
+            ${statHTML('Inhale', p.inhale + 's', PHASE.inhale.a)}
+            ${statHTML('Hold', p.hold + 's', PHASE.hold.a)}
+            ${statHTML('Exhale', p.exhale + 's', PHASE.exhale.a)}
           </div>
-          <div class="overline tabular" style="color:var(--text-tertiary);margin-bottom:22px">SESSION LENGTH 3:00 · 6 cycles</div>
+          <div class="overline tabular" style="color:var(--text-tertiary);margin-bottom:18px">SESSION LENGTH ${mm}:00 · ${cycles} cycles</div>
           <div style="display:flex;gap:12px;width:100%;max-width:360px">
             <button class="btn-ghost" id="customize-btn" style="flex:1">Customize</button>
             <button class="btn-primary" id="sounds-btn" style="flex:1">Sounds right</button>
@@ -405,20 +423,14 @@
     root.querySelector('[data-back]').onclick = () => goto('personalize');
     document.getElementById('customize-btn').onclick = () => toast('Customize after your first session');
     document.getElementById('sounds-btn').onclick = () => goto('permissions');
-    // Fetch a tuned program; keep fallback copy on failure or if no match.
-    (async () => {
-      try {
-        const { data } = await api.get('/api/programs');
-        const progs = (data && data.programs) || [];
-        const catMap = { ease: 'relax', clear: 'focus', rest: 'sleep' };
-        const want = catMap[ob.intent] || 'relax';
-        let prog = progs.find(p => p.category === want && !p.premium);
-        if (!prog) prog = progs.find(p => !p.premium);
-        const name = prog && prog.title ? prog.title : '4-7-8 · Deep Unwind';
-        const nm = document.getElementById('prog-name');
-        if (nm) nm.textContent = name;
-      } catch (e) { /* keep fallback copy */ }
-    })();
+    // Try to refine the program name from the API; keep the tailored fallback.
+    p._apiRefine = (progs) => {
+      const want = goal; // programs are already categorized by intent/goal
+      let prog = progs.find(x => x.category === want && !x.premium) || progs.find(x => !x.premium);
+      const nm = document.getElementById('prog-name');
+      if (nm && prog && prog.title) nm.textContent = prog.title;
+    };
+    (async () => { try { p._apiRefine((await api.get('/api/programs')).data?.programs || []); } catch (e) {} })();
   };
 
   // =====================================================================
@@ -479,7 +491,7 @@
     root.querySelector('[data-back]').onclick = () => goto('permissions');
     document.getElementById('start-btn').onclick = async () => {
       // Persist onboarding prefs, then drop straight into a session tailored to
-      // the choices made during onboarding (intent → pattern, length → cycles).
+      // the goal + length chosen during onboarding (matches previewRecommend).
       try {
         await api.put('/profile', {
           goal: ob.goal,
@@ -491,15 +503,10 @@
         const u = AuraState.user;
         if (u) { u.onboarded = true; AuraState.user = u; }
       } catch (err) { /* profile sync is best-effort; still start the session */ }
-      const intent = ob.intent || 'ease';
-      const pattern = {
-        ease:  { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' },
-        clear: { inhale: 4, hold: 4, exhale: 4, name: 'Box' },
-        rest:  { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' },
-      }[intent] || { inhale: 4, hold: 7, exhale: 8, name: '4-7-8' };
-      const cycleSec = pattern.inhale + pattern.hold + pattern.exhale;
+      const gp = GOAL_PATTERN[ob.goal] || GOAL_PATTERN.relax;
+      const cycleSec = gp.inhale + gp.hold + gp.exhale;
       const cycles = Math.max(2, Math.round((ob.length || 5) * 60 / cycleSec));
-      App.startSession({ inhale: pattern.inhale, hold: pattern.hold, exhale: pattern.exhale, cycles, name: pattern.name, mood: null });
+      App.startSession({ inhale: gp.inhale, hold: gp.hold, exhale: gp.exhale, cycles, name: gp.name, mood: null });
     };
   };
 

@@ -20,9 +20,20 @@
     ['Do you offer refunds?', "If AURA isn't right for you, contact us within 14 days of purchase for a full refund."],
   ];
 
+  // Static fallback so the pricing page always renders even if /billing/plans
+  // fails or the visitor is offline — never a blank page.
+  const FALLBACK_PLANS = [
+    { id: 'free', name: 'Free', monthly_usd: 0, yearly_usd: 0, yearly_monthly_equiv: 0,
+      features: ['3 sessions / day', '4 breathing patterns', 'Mood check-ins', 'Basic stats'] },
+    { id: 'pro', name: 'Pro', monthly_usd: 6, yearly_usd: 54, yearly_monthly_equiv: 4.5,
+      features: ['Unlimited sessions', 'All 18 programs', 'Streaks & insights', 'Custom patterns'] },
+    { id: 'premium', name: 'Premium', monthly_usd: 12, yearly_usd: 108, yearly_monthly_equiv: 9,
+      features: ['Everything in Pro', 'Deep analytics', 'Early-access patterns', 'Priority support'] },
+  ];
+
   async function load() {
-    try { const { data } = await api.get('/billing/plans'); plans = data.plans; }
-    catch (err) { handleApiError(err, 'Could not load plans.'); return; }
+    try { const { data } = await api.get('/billing/plans'); plans = data && data.plans ? data.plans : FALLBACK_PLANS; }
+    catch (err) { plans = FALLBACK_PLANS; /* still render — never a blank page */ }
     render();
   }
 

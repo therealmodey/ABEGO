@@ -93,9 +93,14 @@
       if (authProbe === null) {
         authProbe = 'pending';
         root.innerHTML = loadingScreen();
+        let settled = false;
+        const done = (fn) => { if (settled) return; settled = true; fn(); };
         api.get('/auth/me')
-          .then(({ data }) => { AuraState.user = data.user; authProbe = 'done'; route(); })
-          .catch(() => { authProbe = 'done'; go('welcome'); });
+          .then(({ data }) => { done(() => { AuraState.user = data && data.user; authProbe = 'done'; route(); }); })
+          .catch(() => { done(() => { authProbe = 'done'; go('welcome'); }); });
+        // Safety net: never leave a logged-out visitor staring at the loader if
+        // the probe hangs or returns no body — bounce to welcome after 6s.
+        setTimeout(() => done(() => { authProbe = 'done'; go('welcome'); }), 6000);
         return;
       }
       return go('welcome');
@@ -274,18 +279,18 @@
     root.innerHTML = `${bgHTML()}
     <section class="screen" id="home-screen">
       <header style="padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center">
-        <button class="btn-icon" id="profile-btn" aria-label="Profile"><span style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#22D3EE);display:block"></span></button>
+        <button class="btn-icon" id="profile-btn" style="width:44px;height:44px" aria-label="Profile"><span style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#22D3EE);display:block"></span></button>
         <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-60);letter-spacing:1px;text-transform:uppercase">
           <span class="pulse-dot" style="background:#34D399;box-shadow:0 0 8px #34D399"></span> Ready
         </div>
-        <button class="btn-icon" id="settings-btn" aria-label="Settings">${icon('settings', 18)}</button>
+        <button class="btn-icon" id="settings-btn" style="width:44px;height:44px" aria-label="Settings">${icon('settings', 18)}</button>
       </header>
       <div style="padding:24px 32px 0">
         <p style="font-size:13px;color:var(--ink-50);margin-bottom:4px">${greet}, ${u.name || 'friend'}</p>
         <h1 style="font-size:22px;font-weight:500;letter-spacing:-0.3px">Let's find your calm.</h1>
       </div>
       <div style="flex:1;display:flex;align-items:center;justify-content:center">
-        <div style="position:relative;width:300px;height:300px;display:flex;align-items:center;justify-content:center">
+        <div style="position:relative;width:min(300px,76vw);height:min(300px,76vw);display:flex;align-items:center;justify-content:center">
           ${ringHTML(300, 0, 1.5)}
           ${orbHTML(220, 'idle')}
         </div>
@@ -310,16 +315,18 @@
         </button>
       </nav>
     </section>`;
-    document.getElementById('play-fab').onclick = () => startSession({ inhale: 4, hold: 7, exhale: 8, cycles: 6, name: '4-7-8' });
+    let fabLongPress = false;
+    document.getElementById('play-fab').onclick = () => { if (fabLongPress) { fabLongPress = false; return; } startSession({ inhale: 4, hold: 7, exhale: 8, cycles: 6, name: '4-7-8' }); };
     document.getElementById('suggestion-card').onclick = () => go('programs');
     document.getElementById('insights-btn').onclick = () => go('stats');
     document.getElementById('mood-btn').onclick = () => go('mood');
     document.getElementById('settings-btn').onclick = () => go('settings');
     document.getElementById('profile-btn').onclick = () => go('profile');
-    // long-press FAB → quick start sheet
+    // long-press FAB → quick start sheet. The trailing click after a long
+    // press is suppressed (fabLongPress) so it doesn't ALSO start a session.
     let pressTimer;
     const fab = document.getElementById('play-fab');
-    fab.onmousedown = fab.ontouchstart = () => { pressTimer = setTimeout(() => quickStartSheet(), 550); };
+    fab.onmousedown = fab.ontouchstart = () => { fabLongPress = false; pressTimer = setTimeout(() => { fabLongPress = true; quickStartSheet(); }, 550); };
     fab.onmouseup = fab.onmouseleave = fab.ontouchend = () => clearTimeout(pressTimer);
   };
 
@@ -377,7 +384,7 @@
         <span class="pulse-dot" style="background:#A78BFA;box-shadow:0 0 8px #A78BFA"></span> Preparing
       </div>
       <div style="position:relative;display:flex;align-items:center;justify-content:center">
-        ${[0, 1, 2].map((i) => `<div style="position:absolute;width:220px;height:220px;border-radius:50%;border:1px solid rgba(167,139,250,0.35);animation:auraPulseRing 3s ease-out ${i}s infinite"></div>`).join('')}
+        ${[0, 1, 2].map((i) => `<div style="position:absolute;width:min(220px,64vw);height:min(220px,64vw);border-radius:50%;border:1px solid rgba(167,139,250,0.35);animation:auraPulseRing 3s ease-out ${i}s infinite"></div>`).join('')}
         ${orbHTML(180, 'idle')}
       </div>
       <h2 style="font-size:22px;font-weight:500;margin-top:44px">Tuning to you…</h2>
@@ -397,6 +404,13 @@
       console.warn('[startSession] server start failed, running locally:', err && (err.response && err.response.status || err.message));
     }
     setTimeout(() => runSession(sessionId, cfg), sessionId ? 1400 : 350);
+    // Take ownership of the route so a stray hashchange / route() re-entry
+    // during the session can never re-render the previous screen over the
+    // live session (or its completion screen).
+    routes.session = function () { /* no-op — session manages its own DOM */ };
+    if (location.hash !== '#session') {
+      history.replaceState(null, '', '#session');
+    }
   }
 
   function runSession(sessionId, cfg) {
@@ -409,15 +423,15 @@
     root.innerHTML = `${bgHTML('blue')}
     <section class="screen" id="session-screen">
       <header style="padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center">
-        <button class="btn-icon" id="close-btn" aria-label="End session">${icon('close', 17)}</button>
+        <button class="btn-icon" id="close-btn" style="width:44px;height:44px" aria-label="End session">${icon('close', 17)}</button>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-60);letter-spacing:1px;text-transform:uppercase">
           <span class="pulse-dot" style="background:#60A5FA;box-shadow:0 0 8px #60A5FA"></span>
           <span class="tabular">${cfg.name || 'Custom'} · Cycle <span id="cycle-n">1</span> / ${cfg.cycles}</span>
         </div>
-        <button class="btn-icon" id="sound-btn" aria-label="Sound">${icon('sound', 17)}</button>
+        <button class="btn-icon" id="sound-btn" style="width:44px;height:44px" aria-label="Sound">${icon('sound', 17)}</button>
       </header>
       <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
-        <div style="position:relative;width:320px;height:320px;display:flex;align-items:center;justify-content:center">
+        <div style="position:relative;width:min(320px,80vw);height:min(320px,80vw);display:flex;align-items:center;justify-content:center">
           ${ringHTML(320, 0, 2)}
           ${orbHTML(240, 'inhale', { intensity: 0.85 })}
         </div>
@@ -481,8 +495,23 @@
     S.timer = setInterval(tick, 1000);
 
     document.getElementById('pause-btn').onclick = () => pauseScreen();
-    document.getElementById('close-btn').onclick = async () => {
-      if (await confirmModal('End session?', 'Your progress so far will still be saved.', 'End session')) completeSession(false);
+    document.getElementById('close-btn').onclick = () => {
+      // Direct confirm modal — fire completeSession(false) synchronously on OK
+      // rather than via an awaited resolve, which was racing the timer/next
+      // paint and leaving the session running.
+      const m = window.Aura.openModal('modal-veil modal-veil--center', `
+        <div class="sheet sheet--center" style="max-width:380px">
+          <h3 style="font-size:19px;font-weight:600;margin-bottom:10px">End session?</h3>
+          <p style="font-size:14px;color:var(--text-tertiary);line-height:1.55;margin-bottom:24px">Your progress so far will still be saved.</p>
+          <div style="display:flex;gap:10px">
+            <button class="btn-ghost" data-x style="flex:1">Cancel</button>
+            <button class="btn-primary" data-ok style="flex:1;background:linear-gradient(135deg,#F59E0B,#EF7B0B);box-shadow:0 10px 40px rgba(245,158,11,0.35)">End session</button>
+          </div>
+        </div>`);
+      const finish = () => completeSession(false);
+      m.veil.querySelector('[data-x]').onclick = () => m.close();
+      m.veil.querySelector('[data-ok]').onclick = () => { m.close(finish); };
+      m.veil.onclick = (e) => { if (e.target === m.veil) m.close(); };
     };
     document.getElementById('sound-btn').onclick = () => {
       const next = !Prefs.all.sound;
@@ -535,6 +564,10 @@
   // ================= 07 COMPLETE =================
   function completeScreen(result, elapsed) {
     sessionCtl = null; // fully reset session state — no dead-ends
+    // A local-only session (server start/complete failed) arrives with no
+    // analytics payload. Guard every deref so the completion screen still
+    // renders gracefully instead of throwing on a null result.
+    const r = result || { heartRateDelta: 0, consistency: 0, calmDelta: 0 };
     root.innerHTML = `${bgHTML('green')}
     <section class="screen" style="padding:24px;align-items:center;text-align:center">
       <div style="padding-top:8px">
@@ -546,13 +579,13 @@
       <div>
         <h1 style="font-size:29px;font-weight:600;letter-spacing:-0.5px;margin-bottom:10px">You're calmer now.</h1>
         <p class="compress-gap" style="font-size:14px;color:var(--text-tertiary);max-width:300px;line-height:1.55;margin:0 auto 24px">
-          Heart rate down ${Math.abs(result.heartRateDelta)} bpm · Consistency ${result.consistency >= 80 ? 'improved from last session' : 'building with practice'}.
+          Heart rate down ${Math.abs(r.heartRateDelta)} bpm · Consistency ${r.consistency >= 80 ? 'improved from last session' : 'building with practice'}.
         </p>
       </div>
       <div class="stagger-in" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:380px;margin:22px 0">
         <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#60A5FA">${fmtTime(elapsed)}</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Duration</div></div>
-        <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#34D399">${result.consistency}%</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Consistency</div></div>
-        <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#A78BFA">${result.calmDelta}</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Calm score Δ</div></div>
+        <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#34D399">${r.consistency}%</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Consistency</div></div>
+        <div class="glass" style="padding:16px 10px"><div class="tabular" style="font-size:20px;font-weight:500;color:#A78BFA">${r.calmDelta}</div><div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Calm score Δ</div></div>
       </div>
       <div class="cta-anchor" style="width:100%;max-width:380px">
         <button class="btn-primary" id="home-btn" style="margin-bottom:10px">${icon('home', 17)} Return Home</button>
@@ -762,7 +795,7 @@
     root.innerHTML = `${bgHTML('deep')}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:24px">
-        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <button class="btn-icon" id="back-btn" style="width:44px;height:44px" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Insights</span>
         <button class="btn-icon" id="history-btn" aria-label="History">${icon('doc', 16)}</button>
       </header>
@@ -881,7 +914,7 @@
     root.innerHTML = `${bgHTML()}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
-        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <button class="btn-icon" id="back-btn" style="width:44px;height:44px" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Library</span><span style="width:40px"></span>
       </header>
       <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:6px">Guided journeys</h1>
@@ -1060,7 +1093,7 @@
     root.innerHTML = `${bgHTML()}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:22px">
-        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <button class="btn-icon" id="back-btn" style="width:44px;height:44px" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">History</span><span style="width:40px"></span>
       </header>
       <h1 style="font-size:26px;font-weight:600;letter-spacing:-0.4px;margin-bottom:6px">Your practice</h1>
@@ -1102,7 +1135,7 @@
     root.innerHTML = `${bgHTML()}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:26px">
-        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <button class="btn-icon" id="back-btn" style="width:44px;height:44px" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Profile</span>
         <button class="btn-icon" id="logout-btn" aria-label="Log out">${icon('logout', 16)}</button>
       </header>
@@ -1169,7 +1202,7 @@
     root.innerHTML = `${bgHTML()}
     <section class="screen screen--scroll" style="padding:24px 20px 40px">
       <header style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;margin-bottom:24px">
-        <button class="btn-icon" id="back-btn" aria-label="Back">${icon('back', 17)}</button>
+        <button class="btn-icon" id="back-btn" style="width:44px;height:44px" aria-label="Back">${icon('back', 17)}</button>
         <span class="overline">Settings</span><span style="width:40px"></span>
       </header>
       <button class="glass" id="profile-card" style="width:100%;padding:18px;display:flex;align-items:center;gap:16px;margin-bottom:24px;text-align:left">

@@ -4,6 +4,17 @@
 // router via window.AuraApp.go / window.AuraApp.routes.
 (function () {
   'use strict';
+  // The HTML shell loads this file on EVERY page (pricing/billing/admin) to
+  // keep <script> ordering uniform, but those pages don't load app.js — so
+  // window.AuraApp is undefined there. Without this guard, the first
+  // `App.routes.login = ...` below throws "Cannot read properties of undefined
+  // (reading 'routes')" and aborts the IIFE. The auth routes live on
+  // AuraApp.routes and are driven by the app.js router, so there is nothing
+  // for this module to wire when AuraApp is absent — bail out cleanly.
+  if (typeof window.AuraApp === 'undefined') {
+    console.log('[aura-auth] AuraApp not loaded (non-app page) - skipping route registration');
+    return;
+  }
   const { api, AuraState, orbHTML, icon, toast, confirmModal, bgHTML } = window.Aura;
   const App = window.AuraApp; // { routes, go, ... } defined in app.js
   const root = document.getElementById('app');
